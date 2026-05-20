@@ -37,6 +37,9 @@ copy .env.example .env
 BOT_TOKEN=telegram_bot_token
 DATABASE_URL=sqlite+aiosqlite:///./app.db
 
+API_TOKEN=
+API_AUTH_ENABLED=false
+
 AI_PROVIDER=fallback
 
 CRM_ADAPTER=mock
@@ -65,6 +68,8 @@ FastAPI запускает:
 - `/api/*`;
 - Telegram polling, если задан `BOT_TOKEN`;
 - создание таблиц SQLite через SQLAlchemy metadata.
+
+Если `BOT_TOKEN` пустой, Telegram polling не запускается. Это удобно для smoke/API-проверок: FastAPI стартует, а в лог пишется `Telegram bot disabled: BOT_TOKEN is empty`.
 
 Для миграций:
 
@@ -119,6 +124,39 @@ CRM_ADAPTER=mock
 - `create_task(company_id, title, due_at, notes)`
 
 Если `http_api` недоступен, бот показывает менеджеру понятную ошибку. Если `sqlite_shared` база отсутствует, бот не падает и возвращает пустые данные.
+
+Если CRM недоступна во время фиксации итога консультации, БОТ 2 всё равно сохраняет локальный результат консультации и показывает предупреждение: CRM/БОТ 1 не обновились. Это значит, что менеджеру нужно повторить синхронизацию или проверить БОТ 1.
+
+Для проверки без БОТА 1 используйте:
+
+```env
+CRM_ADAPTER=mock
+```
+
+Mock-режим содержит тестовые стоматологии и подходит для локальной демонстрации менеджеру.
+
+## API auth
+
+По умолчанию API открыт для локальной разработки:
+
+```env
+API_AUTH_ENABLED=false
+```
+
+Чтобы защитить `/api/*`, включите:
+
+```env
+API_AUTH_ENABLED=true
+API_TOKEN=your_internal_token
+```
+
+После этого все `/api/*` endpoints требуют header:
+
+```text
+Authorization: Bearer your_internal_token
+```
+
+`/health` остается публичным. Если `API_AUTH_ENABLED=true`, но `API_TOKEN` пустой, приложение пишет предупреждение в лог, а `/api/*` возвращает ошибку конфигурации.
 
 ## AI providers
 
@@ -201,6 +239,8 @@ PDF_EXPORT_PROVIDER=libreoffice
 - `GET /api/consultations/{consultation_id}`
 - `POST /api/consultations`
 - `POST /api/consultations/{consultation_id}/notes`
+- `POST /api/consultations/{consultation_id}/attachments/link`
+- `POST /api/consultations/{consultation_id}/attachments/text`
 - `POST /api/consultations/{consultation_id}/generate-audit`
 - `POST /api/consultations/{consultation_id}/generate-docx`
 - `POST /api/consultations/{consultation_id}/result`
@@ -232,11 +272,26 @@ py scripts/smoke_test.py
 
 Проверяет:
 
+- `/health` доступен без API token;
 - mock CRM возвращает клиентов;
 - создается consultation;
 - fallback audit генерируется и парсится;
 - DOCX создается;
-- итог консультации обновляет статус.
+- итог консультации обновляет статус и возвращает `warning=None` в mock CRM;
+- при падении CRM adapter локальный итог сохраняется, а warning возвращается.
+
+## Логирование
+
+Логируются:
+
+- старт/остановка FastAPI;
+- отключение Telegram при пустом `BOT_TOKEN`;
+- старт/падение Telegram polling;
+- ошибки CRM adapter;
+- ошибки AI provider и переход на fallback;
+- ошибки PDF export.
+
+Секреты `BOT_TOKEN`, `OPENROUTER_API_KEY`, `CRM_API_TOKEN`, `API_TOKEN` не логируются.
 
 ## Следующие этапы
 

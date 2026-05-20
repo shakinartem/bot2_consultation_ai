@@ -1,14 +1,17 @@
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.database import get_session
 from app.modules.consultation.service import ConsultationService
 from app.modules.crm.service import CRMAdapterError, crm_service
 from app.modules.documents.generator import generate_consultation_docx
 from app.modules.documents.pdf import export_pdf_if_available
 from app.schemas import (
+    AttachmentCreate,
+    AttachmentRead,
     AuditResponse,
     CompanyRead,
     ConsultationCreate,
@@ -17,10 +20,22 @@ from app.schemas import (
     NoteCreate,
     NoteRead,
     ResultCreate,
+    ResultResponse,
 )
 
 
-router = APIRouter(prefix="/api")
+async def require_api_auth(authorization: str | None = Header(default=None)) -> None:
+    settings = get_settings()
+    if not settings.api_auth_enabled:
+        return
+    if not settings.api_token:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="API auth is enabled but API_TOKEN is not configured")
+    expected = f"Bearer {settings.api_token}"
+    if authorization != expected:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API token")
+
+
+router = APIRouter(prefix="/api", dependencies=[Depends(require_api_auth)])
 
 
 @router.get("/consultations", response_model=list[ConsultationRead])
@@ -54,6 +69,28 @@ async def add_note(consultation_id: int, payload: NoteCreate, session: AsyncSess
     if consultation is None:
         raise HTTPException(status_code=404, detail="Consultation not found")
     return await service.add_note(consultation_id, payload.content)
+
+
+@router.post("/consultations/{consultation_id}/attachments/link", response_model=AttachmentRead)
+async def add_link_attachment(consultation_id: int, payload: AttachmentCreate, session: AsyncSession = Depends(get_session)):
+    if payload.type != "link":
+        raise HTTPException(status_code=400, detail="Payload type must be link")
+    service = ConsultationService(session)
+    consultation = await service.get(consultation_id)
+    if consultation is None:
+        raise HTTPException(status_code=404, detail="Consultation not found")
+    return await service.add_attachment(consultation_id, payload.value, "link")
+
+
+@router.post("/consultations/{consultation_id}/attachments/text", response_model=AttachmentRead)
+async def add_text_attachment(consultation_id: int, payload: AttachmentCreate, session: AsyncSession = Depends(get_session)):
+    if payload.type != "text":
+        raise HTTPException(status_code=400, detail="Payload type must be text")
+    service = ConsultationService(session)
+    consultation = await service.get(consultation_id)
+    if consultation is None:
+        raise HTTPException(status_code=404, detail="Consultation not found")
+    return await service.add_attachment(consultation_id, payload.value, "text")
 
 
 @router.post("/consultations/{consultation_id}/generate-audit", response_model=AuditResponse)
@@ -94,10 +131,11 @@ async def generate_docx(consultation_id: int, session: AsyncSession = Depends(ge
     )
 
 
-@router.post("/consultations/{consultation_id}/result", response_model=ConsultationRead)
+@router.post("/consultations/{consultation_id}/result", response_model=ResultResponse)
 async def set_result(consultation_id: int, payload: ResultCreate, session: AsyncSession = Depends(get_session)):
     try:
-        return await ConsultationService(session).set_result(consultation_id, payload.result, payload.notes)
+        consultation, warning = await ConsultationService(session).set_result(consultation_id, payload.result, payload.notes)
+        return ResultResponse(consultation=consultation, warning=warning)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

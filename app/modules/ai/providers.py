@@ -1,8 +1,11 @@
 from abc import ABC, abstractmethod
+import logging
 
 import httpx
 
 from app.config import Settings, get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class AIProviderError(RuntimeError):
@@ -40,6 +43,7 @@ class OpenRouterProvider(AIProvider):
                 data = response.json()
                 return data["choices"][0]["message"]["content"]
         except (httpx.HTTPError, KeyError, IndexError, ValueError) as exc:
+            logger.warning("OpenRouter provider failed: %s", exc)
             raise AIProviderError(f"OpenRouter error: {exc}") from exc
 
 
@@ -61,6 +65,7 @@ class OllamaProvider(AIProvider):
                 response.raise_for_status()
                 return response.json()["response"]
         except (httpx.HTTPError, KeyError, ValueError) as exc:
+            logger.warning("Ollama provider failed: %s", exc)
             raise AIProviderError(f"Ollama error: {exc}") from exc
 
 

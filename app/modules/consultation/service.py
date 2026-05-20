@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import datetime, timedelta
+import logging
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,8 @@ from app.modules.consultation.models import (
 )
 from app.modules.crm.service import CRMAdapter, CRMAdapterError, crm_service
 
+
+logger = logging.getLogger(__name__)
 
 ACTIVE_STATUSES = {
     ConsultationStatus.pending.value,
@@ -144,7 +147,8 @@ class ConsultationService:
         prompt = build_consultation_audit_prompt(asdict(company), context)
         try:
             audit_text = await self.ai_provider.generate(prompt)
-        except AIProviderError:
+        except AIProviderError as exc:
+            logger.warning("AI provider failed for consultation %s, using fallback: %s", consultation_id, exc)
             audit_text = await FallbackProvider().generate(prompt)
 
         parsed = parse_audit_text(audit_text)
@@ -156,7 +160,7 @@ class ConsultationService:
         await self.session.refresh(consultation)
         return consultation, audit_text
 
-    async def set_result(self, consultation_id: int, result: str, notes: str | None = None) -> Consultation:
+    async def set_result(self, consultation_id: int, result: str, notes: str | None = None) -> tuple[Consultation, str | None]:
         consultation = await self.get(consultation_id)
         if consultation is None:
             raise ValueError("Consultation not found")
@@ -176,6 +180,7 @@ class ConsultationService:
         if notes:
             self.session.add(ConsultationNote(consultation_id=consultation_id, content=f"Итог консультации: {notes}"))
 
+        warning: str | None = None
         crm_status = "client" if result == "signed" else result_to_status[result]
         try:
             await self.crm.update_company_status(consultation.company_id, crm_status)
@@ -199,9 +204,19 @@ class ConsultationService:
                     due_at=datetime.utcnow() + timedelta(days=2),
                     notes="Договор отправлен после консультации.",
                 )
-        except CRMAdapterError:
-            pass
+        except CRMAdapterError as exc:
+            warning = (
+                "Локальный итог консультации сохранен, но CRM/БОТ 1 не обновились. "
+                f"Причина: {exc}"
+            )
+            logger.warning(
+                "CRM update failed after local consultation result save: consultation_id=%s company_id=%s result=%s error=%s",
+                consultation_id,
+                consultation.company_id,
+                result,
+                exc,
+            )
 
         await self.session.commit()
         await self.session.refresh(consultation)
-        return consultation
+        return consultation, warning

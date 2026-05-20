@@ -8,6 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     bot_token: str = Field(default="", alias="BOT_TOKEN")
     database_url: str = Field(default="sqlite+aiosqlite:///./app.db", alias="DATABASE_URL")
+    api_token: str = Field(default="", alias="API_TOKEN")
+    api_auth_enabled: bool = Field(default=False, alias="API_AUTH_ENABLED")
 
     ai_provider: str = Field(default="fallback", alias="AI_PROVIDER")
     openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")

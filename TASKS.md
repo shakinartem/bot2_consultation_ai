@@ -8,6 +8,9 @@ MVP доведен до рабочего сценария менеджера: Fa
 
 - [x] Базовая структура `app/`, `alembic/`, `storage/`, `templates/`.
 - [x] FastAPI entrypoint `app.main:app` с `/health`.
+- [x] Базовое логирование старта, polling, CRM/AI/PDF ошибок.
+- [x] Безопасный старт Telegram polling: пустой `BOT_TOKEN` отключает бот с записью в лог.
+- [x] Простая token-защита `/api/*` через `API_AUTH_ENABLED`.
 - [x] Telegram bot на aiogram 3.
 - [x] SQLAlchemy модели `Consultation`, `ConsultationNote`, `ConsultationAttachment`.
 - [x] Alembic initial migration.
@@ -26,6 +29,8 @@ MVP доведен до рабочего сценария менеджера: Fa
 - [x] FastAPI endpoints для будущих web/mini app и других ботов.
 - [x] Smoke test.
 - [x] Обновление README.
+- [x] Стабилизация ошибок CRM при фиксации результата консультации.
+- [x] API endpoints для text/link attachments.
 
 ## MVP задачи
 
@@ -42,11 +47,14 @@ MVP доведен до рабочего сценария менеджера: Fa
 - [x] Добавлять interaction/task в CRM adapter при результате.
 - [x] Дать минимальные API endpoints.
 - [x] Smoke test: CRM mock -> consultation -> fallback audit -> DOCX.
+- [x] Smoke test: `set_result()` возвращает `warning=None` на mock CRM.
+- [x] Smoke test: при падении CRM локальный итог сохраняется, warning возвращается.
 
 ## Технический долг
 
 - [ ] Разнести большой `app/bot.py` на routers/services после MVP.
 - [ ] Добавить полноценные pytest-тесты и test database fixtures.
+- [ ] Добавить structured logging/trace id для production.
 - [ ] Добавить persistent CRM integration после доступа к БОТУ 1.
 - [ ] Добавить нормальную миграцию данных при смене схемы в production.
 - [ ] Добавить централизованное логирование без секретов.

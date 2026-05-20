@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F, Router
@@ -31,6 +32,7 @@ from app.modules.files.storage import company_storage_dir, safe_filename
 
 router = Router()
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+logger = logging.getLogger(__name__)
 
 
 class ConsultationStates(StatesGroup):
@@ -484,11 +486,13 @@ async def receive_result_notes(message: Message, state: FSMContext) -> None:
     result = data["result"]
     async with AsyncSessionLocal() as session:
         service = ConsultationService(session)
-        consultation = await service.set_result(consultation_id, result, message.text or result)
+        consultation, warning = await service.set_result(consultation_id, result, message.text or result)
     await state.clear()
     suffix = ""
     if result == "signed":
         suffix = "\nСтатус компании обновлен на client. Клиент готов к передаче в production bot."
+    if warning:
+        suffix += f"\n\n⚠️ {warning}"
     await message.answer(f"Итог сохранен. Статус консультации: <b>{consultation.status}</b>{suffix}")
 
 
@@ -546,11 +550,17 @@ async def ai_settings(message: Message) -> None:
 async def start_bot() -> None:
     settings = get_settings()
     if not settings.bot_token:
+        logger.info("Telegram bot disabled: BOT_TOKEN is empty")
         return
+    logger.info("Initializing Telegram bot")
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dispatcher = Dispatcher(storage=MemoryStorage())
     dispatcher.include_router(router)
-    await dispatcher.start_polling(bot)
+    try:
+        await dispatcher.start_polling(bot)
+    except Exception:
+        logger.exception("Telegram polling failed")
+        raise

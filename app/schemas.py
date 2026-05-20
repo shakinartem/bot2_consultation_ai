@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CompanyRead(BaseModel):
@@ -14,7 +14,7 @@ class CompanyRead(BaseModel):
     phone: str | None = None
     website: str | None = None
     maps_url: str | None = None
-    social_links: list[str] = []
+    social_links: list[str] = Field(default_factory=list)
     rating: float | None = None
     reviews_count: int | None = None
     reputation_notes: str | None = None
@@ -31,6 +31,11 @@ class ConsultationCreate(BaseModel):
 
 class NoteCreate(BaseModel):
     content: str
+
+
+class AttachmentCreate(BaseModel):
+    value: str
+    type: str = Field(pattern="^(link|text)$")
 
 
 class ResultCreate(BaseModel):
@@ -73,6 +78,16 @@ class NoteRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AttachmentRead(BaseModel):
+    id: int
+    consultation_id: int
+    file_path: str
+    type: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class AuditResponse(BaseModel):
     consultation: ConsultationRead
     audit_text: str
@@ -83,3 +98,8 @@ class DocumentResponse(BaseModel):
     document_path: str
     pdf_path: str | None = None
     pdf_message: str
+
+
+class ResultResponse(BaseModel):
+    consultation: ConsultationRead
+    warning: str | None = None

@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.config import Settings, get_settings
+
+logger = logging.getLogger(__name__)
 
 
 CONSULTATION_READY_STATUS = "consultation_scheduled"
@@ -221,6 +224,7 @@ class HTTPCRMAdapter(CRMAdapter):
                     return response.json()
                 return None
         except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("CRM API request failed: %s %s: %s", method, path, exc)
             raise CRMAdapterError(f"CRM API недоступна или вернула ошибку: {exc}") from exc
 
     async def list_consultation_scheduled(self) -> list[Company]:
@@ -304,7 +308,8 @@ class SharedSQLiteCRMAdapter(CRMAdapter):
                     params,
                 )
                 return [Company.from_mapping(dict(row._mapping)) for row in result]
-        except Exception:
+        except Exception as exc:
+            logger.warning("Shared SQLite CRM read failed: %s", exc)
             return []
 
     async def list_consultation_scheduled(self) -> list[Company]:
@@ -316,15 +321,16 @@ class SharedSQLiteCRMAdapter(CRMAdapter):
 
     async def update_company_status(self, company_id: int, status: str) -> None:
         if not self._sqlite_path_exists():
-            return
+            raise CRMAdapterError("Shared SQLite CRM database not found")
         try:
             async with self.engine.begin() as conn:
                 await conn.execute(
                     text("UPDATE companies SET status = :status WHERE id = :company_id"),
                     {"company_id": company_id, "status": status},
                 )
-        except Exception:
-            return
+        except Exception as exc:
+            logger.warning("Shared SQLite CRM status update failed: %s", exc)
+            raise CRMAdapterError(f"Shared SQLite CRM status update failed: {exc}") from exc
 
     async def add_interaction(
         self,
@@ -334,7 +340,7 @@ class SharedSQLiteCRMAdapter(CRMAdapter):
         notes: str | None = None,
     ) -> None:
         if not self._sqlite_path_exists():
-            return
+            raise CRMAdapterError("Shared SQLite CRM database not found")
         try:
             async with self.engine.begin() as conn:
                 await conn.execute(
@@ -344,8 +350,9 @@ class SharedSQLiteCRMAdapter(CRMAdapter):
                     ),
                     {"company_id": company_id, "type": type, "result": result, "notes": notes},
                 )
-        except Exception:
-            return
+        except Exception as exc:
+            logger.warning("Shared SQLite CRM interaction insert failed: %s", exc)
+            raise CRMAdapterError(f"Shared SQLite CRM interaction insert failed: {exc}") from exc
 
     async def create_task(
         self,
@@ -355,7 +362,7 @@ class SharedSQLiteCRMAdapter(CRMAdapter):
         notes: str | None = None,
     ) -> None:
         if not self._sqlite_path_exists():
-            return
+            raise CRMAdapterError("Shared SQLite CRM database not found")
         try:
             async with self.engine.begin() as conn:
                 await conn.execute(
@@ -370,8 +377,9 @@ class SharedSQLiteCRMAdapter(CRMAdapter):
                         "notes": notes,
                     },
                 )
-        except Exception:
-            return
+        except Exception as exc:
+            logger.warning("Shared SQLite CRM task insert failed: %s", exc)
+            raise CRMAdapterError(f"Shared SQLite CRM task insert failed: {exc}") from exc
 
 
 def get_crm_adapter(settings: Settings | None = None) -> CRMAdapter:
