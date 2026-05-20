@@ -1,40 +1,70 @@
+from __future__ import annotations
+
 from dataclasses import asdict
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.modules.ai.parser import parse_audit_text
 from app.modules.ai.prompts import build_consultation_audit_prompt
-from app.modules.ai.providers import AIProvider, get_ai_provider
+from app.modules.ai.providers import AIProvider, AIProviderError, FallbackProvider, get_ai_provider
 from app.modules.consultation.models import (
     Consultation,
     ConsultationAttachment,
     ConsultationNote,
     ConsultationStatus,
 )
-from app.modules.crm.service import CRMService, crm_service
+from app.modules.crm.service import CRMAdapter, CRMAdapterError, crm_service
+
+
+ACTIVE_STATUSES = {
+    ConsultationStatus.pending.value,
+    ConsultationStatus.in_progress.value,
+    ConsultationStatus.thinking.value,
+    ConsultationStatus.contract_sent.value,
+}
 
 
 class ConsultationService:
     def __init__(
         self,
         session: AsyncSession,
-        crm: CRMService = crm_service,
+        crm: CRMAdapter = crm_service,
         ai_provider: AIProvider | None = None,
     ) -> None:
         self.session = session
         self.crm = crm
         self.ai_provider = ai_provider or get_ai_provider()
 
-    async def get_or_create_for_company(self, company_id: int) -> Consultation:
-        consultation = await self.get_by_company_id(company_id)
-        if consultation is not None:
-            return consultation
-        consultation = Consultation(company_id=company_id, status=ConsultationStatus.pending.value)
+    async def create(self, company_id: int, status: str = ConsultationStatus.pending.value) -> Consultation:
+        consultation = Consultation(company_id=company_id, status=status)
         self.session.add(consultation)
         await self.session.commit()
         await self.session.refresh(consultation)
         return consultation
+
+    async def list(self, limit: int = 50) -> list[Consultation]:
+        result = await self.session.execute(
+            select(Consultation).order_by(Consultation.updated_at.desc()).limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def get_or_create_for_company(self, company_id: int) -> Consultation:
+        consultation = await self.get_active_by_company_id(company_id)
+        if consultation is not None:
+            return consultation
+        return await self.create(company_id)
+
+    async def get_active_by_company_id(self, company_id: int) -> Consultation | None:
+        result = await self.session.execute(
+            select(Consultation)
+            .where(Consultation.company_id == company_id)
+            .where(Consultation.status.in_(ACTIVE_STATUSES))
+            .order_by(Consultation.id.desc())
+        )
+        return result.scalars().first()
 
     async def get_by_company_id(self, company_id: int) -> Consultation | None:
         result = await self.session.execute(
@@ -45,10 +75,26 @@ class ConsultationService:
     async def get(self, consultation_id: int) -> Consultation | None:
         return await self.session.get(Consultation, consultation_id)
 
+    async def get_with_relations(self, consultation_id: int) -> Consultation | None:
+        result = await self.session.execute(
+            select(Consultation)
+            .where(Consultation.id == consultation_id)
+            .options(selectinload(Consultation.notes), selectinload(Consultation.attachments))
+        )
+        return result.scalars().first()
+
     async def list_archive(self) -> list[Consultation]:
         result = await self.session.execute(
             select(Consultation)
-            .where(Consultation.status.in_([ConsultationStatus.completed.value, ConsultationStatus.refused.value, ConsultationStatus.client.value]))
+            .where(
+                Consultation.status.in_(
+                    [
+                        ConsultationStatus.completed.value,
+                        ConsultationStatus.refused.value,
+                        ConsultationStatus.client.value,
+                    ]
+                )
+            )
             .order_by(Consultation.updated_at.desc())
             .limit(20)
         )
@@ -72,6 +118,18 @@ class ConsultationService:
         await self.session.refresh(attachment)
         return attachment
 
+    async def _extra_audit_context(self, consultation_id: int) -> dict[str, list[str]]:
+        consultation = await self.get_with_relations(consultation_id)
+        if consultation is None:
+            return {"notes": [], "attachments": []}
+        return {
+            "notes": [note.content for note in consultation.notes[-10:]],
+            "attachments": [
+                f"{attachment.type}: {attachment.file_path}"
+                for attachment in consultation.attachments[-10:]
+            ],
+        }
+
     async def generate_audit(self, consultation_id: int, extra_data: dict | None = None) -> tuple[Consultation, str]:
         consultation = await self.get(consultation_id)
         if consultation is None:
@@ -80,17 +138,25 @@ class ConsultationService:
         if company is None:
             raise ValueError("Company not found")
 
-        prompt = build_consultation_audit_prompt(asdict(company), extra_data)
-        audit_text = await self.ai_provider.generate(prompt)
+        context = await self._extra_audit_context(consultation_id)
+        if extra_data:
+            context.update(extra_data)
+        prompt = build_consultation_audit_prompt(asdict(company), context)
+        try:
+            audit_text = await self.ai_provider.generate(prompt)
+        except AIProviderError:
+            audit_text = await FallbackProvider().generate(prompt)
+
         parsed = parse_audit_text(audit_text)
         for field, value in parsed.items():
-            setattr(consultation, field, value)
+            if hasattr(consultation, field):
+                setattr(consultation, field, value)
         consultation.status = ConsultationStatus.in_progress.value
         await self.session.commit()
         await self.session.refresh(consultation)
         return consultation, audit_text
 
-    async def set_result(self, consultation_id: int, result: str) -> Consultation:
+    async def set_result(self, consultation_id: int, result: str, notes: str | None = None) -> Consultation:
         consultation = await self.get(consultation_id)
         if consultation is None:
             raise ValueError("Consultation not found")
@@ -101,10 +167,41 @@ class ConsultationService:
             "contract_sent": ConsultationStatus.contract_sent.value,
             "signed": ConsultationStatus.client.value,
         }
-        consultation.status = result_to_status[result]
+        if result not in result_to_status:
+            raise ValueError("Unknown result")
 
-        if result == "signed":
-            await self.crm.update_company_status(consultation.company_id, "client")
+        consultation.status = result_to_status[result]
+        consultation.result_summary = notes or result
+
+        if notes:
+            self.session.add(ConsultationNote(consultation_id=consultation_id, content=f"Итог консультации: {notes}"))
+
+        crm_status = "client" if result == "signed" else result_to_status[result]
+        try:
+            await self.crm.update_company_status(consultation.company_id, crm_status)
+            await self.crm.add_interaction(
+                consultation.company_id,
+                type="consultation",
+                result=result_to_status[result],
+                notes=notes,
+            )
+            if result == "thinking":
+                await self.crm.create_task(
+                    consultation.company_id,
+                    title="Повторно связаться после консультации",
+                    due_at=datetime.utcnow() + timedelta(days=3),
+                    notes="Клиент думает после консультации БОТА 2.",
+                )
+            elif result == "contract_sent":
+                await self.crm.create_task(
+                    consultation.company_id,
+                    title="Проверить статус договора",
+                    due_at=datetime.utcnow() + timedelta(days=2),
+                    notes="Договор отправлен после консультации.",
+                )
+        except CRMAdapterError:
+            pass
+
         await self.session.commit()
         await self.session.refresh(consultation)
         return consultation

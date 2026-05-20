@@ -1,166 +1,211 @@
-# SHARiK digital Consultation AI System
+# БОТ 2 — SHARiK digital Consultation AI
 
-MVP Telegram-бота №2 для клиентов, которые прошли квалификацию после холодного звонка.
+БОТ 2 помогает менеджеру агентства ШАРиК digital / SPG готовить и проводить консультации со стоматологическими клиниками.
 
-Бот помогает менеджеру:
+Связка с системой:
 
-- получать клиентов из CRM со статусом `consultation_scheduled`;
-- открывать карточку клиента;
-- добавлять заметки, ссылки и материалы;
-- генерировать AI-аудит сайта, карт, соцсетей и репутации;
-- формировать точки роста, рекомендации и roadmap;
-- создавать DOCX-документ с айдентикой ШАРиК digital;
-- фиксировать результат консультации.
+- БОТ 1 CRM находит и ведет лидов, фиксирует холодные звонки и переводит подходящих клиентов в статус `consultation_scheduled`.
+- БОТ 2 не парсит клиентов сам. Он получает клиентов из CRM/БОТА 1 через `CRM_ADAPTER`.
+- Менеджер в Telegram открывает карточку клиники, добавляет заметки/ссылки/материалы, генерирует AI-аудит и DOCX, затем фиксирует итог консультации.
+
+## Возможности MVP
+
+- Telegram-first интерфейс для менеджера.
+- Список клиентов со статусом `consultation_scheduled`.
+- Карточка стоматологической клиники.
+- Активная консультация без дублей.
+- Заметки, ссылки и материалы клиента.
+- AI-аудит сайта, карт, соцсетей и репутации.
+- Roadmap на 7/30/90 дней.
+- DOCX с айдентикой ШАРиК digital.
+- Опциональный PDF export через LibreOffice.
+- FastAPI endpoints для будущего web/mini app.
+- Mock CRM для локального запуска без внешних сервисов.
 
 ## Установка
 
-```bash
-python -m venv .venv
+```powershell
+py -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 copy .env.example .env
 ```
 
-Заполните `.env`:
+Заполните `.env`.
 
 ```env
 BOT_TOKEN=telegram_bot_token
 DATABASE_URL=sqlite+aiosqlite:///./app.db
+
 AI_PROVIDER=fallback
+
+CRM_ADAPTER=mock
+CRM_API_BASE_URL=http://localhost:8001
+CRM_API_TOKEN=
+CRM_SHARED_DATABASE_URL=sqlite+aiosqlite:///../bot1_crm/app.db
+
+PDF_EXPORT_ENABLED=false
+PDF_EXPORT_PROVIDER=none
+
+STORAGE_PATH=./storage
 ADMIN_IDS=123456789,987654321
 ```
 
-Если `ADMIN_IDS` пустой, бот доступен всем, кто знает токен бота. Для рабочего режима лучше указать Telegram ID менеджеров.
+Важно: пустой `ADMIN_IDS` — только dev-режим. В рабочем режиме укажите Telegram ID менеджеров, иначе бот будет доступен всем, кто знает токен.
 
 ## Запуск
 
-```bash
+```powershell
 uvicorn app.main:app --reload
 ```
 
-FastAPI поднимет:
+FastAPI запускает:
 
-- `/health` для проверки сервиса;
-- Telegram polling-бота;
-- SQLite-таблицы через `Base.metadata.create_all`.
+- `/health`;
+- `/api/*`;
+- Telegram polling, если задан `BOT_TOKEN`;
+- создание таблиц SQLite через SQLAlchemy metadata.
 
-Для production-подхода можно использовать Alembic:
+Для миграций:
 
-```bash
+```powershell
 alembic upgrade head
 ```
 
+## Telegram сценарий
+
+Главное меню:
+
+- 📋 Клиенты на консультацию
+- 🔎 Открыть карточку
+- 🧠 Сгенерировать аудит
+- 📄 Сгенерировать документ
+- ✅ Указать результат консультации
+- 🗂 Архив консультаций
+- ⚙️ Настройки AI
+- ❓ Помощь
+
+Рабочий путь менеджера:
+
+1. Нажать `📋 Клиенты на консультацию`.
+2. Открыть карточку стоматологии.
+3. Добавить заметку, ссылки и материалы.
+4. Сгенерировать AI-аудит.
+5. Сгенерировать DOCX.
+6. Указать итог: отказ, думает, договор отправлен, договор подписан.
+
+При подписании договора статус консультации становится `client`, а CRM adapter получает обновление статуса компании.
+
+## CRM_ADAPTER
+
+Настройка:
+
+```env
+CRM_ADAPTER=mock
+```
+
+Режимы:
+
+- `mock` / `in_memory` — локальный тестовый режим, работает без внешних зависимостей.
+- `http_api` — заготовка для API БОТА 1.
+- `sqlite_shared` — заготовка для чтения общей SQLite базы БОТА 1.
+
+Интерфейс adapter:
+
+- `list_consultation_scheduled()`
+- `get_company(company_id)`
+- `update_company_status(company_id, status)`
+- `add_interaction(company_id, type, result, notes)`
+- `create_task(company_id, title, due_at, notes)`
+
+Если `http_api` недоступен, бот показывает менеджеру понятную ошибку. Если `sqlite_shared` база отсутствует, бот не падает и возвращает пустые данные.
+
 ## AI providers
-
-Провайдер выбирается через `AI_PROVIDER`.
-
-### fallback
 
 ```env
 AI_PROVIDER=fallback
 ```
 
-Не требует ключей. Возвращает базовый шаблон аудита, чтобы весь workflow работал сразу.
+Поддерживаются:
 
-### OpenRouter
+- `fallback` — локальный структурированный шаблон, без ключей и сети.
+- `openrouter` — OpenRouter chat completions.
+- `ollama` — локальный Ollama.
 
-```env
-AI_PROVIDER=openrouter
-OPENROUTER_API_KEY=...
-OPENROUTER_MODEL=meta-llama/llama-3.1-8b-instruct:free
-```
+Fallback всегда возвращает markdown-разделы:
 
-### Ollama
+- `# Общий вывод`
+- `# Аудит сайта`
+- `# Аудит карт`
+- `# Аудит соцсетей`
+- `# Репутация`
+- `# Основные проблемы`
+- `# Точки роста`
+- `# Быстрые улучшения`
+- `# План на 7 дней`
+- `# План на 30 дней`
+- `# План на 90 дней`
+- `# Рекомендации по услугам ШАРиК digital`
+- `# Следующий шаг`
 
-```env
-AI_PROVIDER=ollama
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=qwen2.5:7b
-```
-
-## Генерация аудита
-
-Prompt строится функцией:
+Prompt builder:
 
 ```python
 build_consultation_audit_prompt(company_data, extra_data)
 ```
 
-AI должен вернуть разделы:
+Он учитывает название клиники, город, сайт, карты, рейтинг, отзывы, соцсети, заметки CRM, боль клиента, результат холодного звонка, заметки менеджера и материалы.
 
-1. Общий вывод
-2. Аудит сайта
-3. Аудит карт
-4. Аудит соцсетей
-5. Репутация
-6. Основные проблемы
-7. Точки роста
-8. Быстрые улучшения
-9. План на 7 дней
-10. План на 30 дней
-11. План на 90 дней
-12. Рекомендации по услугам
+## DOCX/PDF
 
-Из ответа парсятся поля консультации: аудит сайта, карт, соцсетей, репутации, точки роста, рекомендации и roadmap.
-
-## Генерация DOCX
-
-DOCX создается через `python-docx` и сохраняется в:
+DOCX создается всегда:
 
 ```text
 storage/docs/consultation_company_{company_id}_{consultation_id}.docx
 ```
 
-Документ содержит:
+Структура документа:
 
-- обложку `ШАРиК digital`;
-- информацию о клиенте;
-- краткий вывод;
-- сайт;
-- карты;
-- соцсети;
-- репутацию;
+- обложка;
+- краткое резюме;
+- таблица данных клиента;
+- аудит сайта, карт, соцсетей и репутации;
+- основные проблемы;
 - точки роста;
-- планы на 7, 30 и 90 дней;
-- рекомендации;
-- следующий шаг.
+- быстрые улучшения;
+- план на 7/30/90 дней;
+- рекомендации по услугам ШАРиК digital;
+- следующий шаг;
+- подвал с позиционированием агентства.
 
-## Структура консультации
+PDF опционален:
 
-Основные модели:
+```env
+PDF_EXPORT_ENABLED=false
+PDF_EXPORT_PROVIDER=none
+```
 
-- `Consultation`
-- `ConsultationNote`
-- `ConsultationAttachment`
+Для локального PDF:
 
-Статусы консультации:
+```env
+PDF_EXPORT_ENABLED=true
+PDF_EXPORT_PROVIDER=libreoffice
+```
 
-- `pending`
-- `in_progress`
-- `completed`
-- `refused`
-- `thinking`
-- `contract_sent`
-- `client`
+Если LibreOffice недоступен, бот отправит DOCX и сообщит, что PDF недоступен.
 
-Результаты в боте:
+## API endpoints
 
-- отказ -> `refused`
-- думает -> `thinking`
-- договор отправлен -> `contract_sent`
-- договор подписан -> `client`
-
-Если договор подписан, CRM-статус компании обновляется на `client`. В коде оставлена архитектурная точка для передачи клиента в production bot.
-
-## CRM
-
-Сейчас CRM реализована как in-memory adapter в `app/modules/crm/service.py`.
-
-Для интеграции с ботом №1 или реальной CRM нужно заменить методы:
-
-- `list_consultation_scheduled`
-- `get_company`
-- `update_company_status`
+- `GET /health`
+- `GET /api/consultations`
+- `GET /api/consultations/{consultation_id}`
+- `POST /api/consultations`
+- `POST /api/consultations/{consultation_id}/notes`
+- `POST /api/consultations/{consultation_id}/generate-audit`
+- `POST /api/consultations/{consultation_id}/generate-docx`
+- `POST /api/consultations/{consultation_id}/result`
+- `GET /api/crm/consultation-scheduled`
+- `GET /api/crm/companies/{company_id}`
 
 ## Хранение файлов
 
@@ -171,29 +216,34 @@ storage/
 └── clients/
 ```
 
-Материалы клиента сохраняются в:
+Материалы клиента:
 
 ```text
 storage/clients/company_{id}/
 ```
 
-## Telegram меню
+`.gitignore` исключает `.env`, SQLite базы и реальные клиентские файлы из `storage`.
 
-- Клиенты на консультацию
-- Открыть карточку
-- Добавить заметки
-- Добавить ссылки
-- Добавить материалы
-- Сгенерировать аудит
-- Сгенерировать DOCX
-- Указать результат консультации
-- Архив консультаций
-- Настройки AI
+## Smoke test
+
+```powershell
+py scripts/smoke_test.py
+```
+
+Проверяет:
+
+- mock CRM возвращает клиентов;
+- создается consultation;
+- fallback audit генерируется и парсится;
+- DOCX создается;
+- итог консультации обновляет статус.
 
 ## Следующие этапы
 
-- Брендовый PDF-экспорт.
-- Cloudinary для хранения материалов и документов.
-- Передача клиента в production bot после подписания договора.
-- Roadmap bot для ведения работ после консультации.
-- Content bot для генерации контента и материалов.
+- Реальная интеграция с БОТОМ 1 после согласования схемы/API.
+- Полноценные pytest-тесты и test DB fixtures.
+- Брендовый PDF export с шаблонами.
+- Production bot handoff после подписания договора.
+- Roadmap bot для ведения работ.
+- Content bot для контента стоматологии.
+- Опциональное внешнее хранилище, например Cloudinary, без обязательной зависимости в MVP.

@@ -18,6 +18,17 @@ class Settings(BaseSettings):
     ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
     ollama_model: str = Field(default="qwen2.5:7b", alias="OLLAMA_MODEL")
 
+    crm_adapter: str = Field(default="mock", alias="CRM_ADAPTER")
+    crm_api_base_url: str = Field(default="http://localhost:8001", alias="CRM_API_BASE_URL")
+    crm_api_token: str = Field(default="", alias="CRM_API_TOKEN")
+    crm_shared_database_url: str = Field(
+        default="sqlite+aiosqlite:///../bot1_crm/app.db",
+        alias="CRM_SHARED_DATABASE_URL",
+    )
+
+    pdf_export_enabled: bool = Field(default=False, alias="PDF_EXPORT_ENABLED")
+    pdf_export_provider: str = Field(default="none", alias="PDF_EXPORT_PROVIDER")
+
     storage_path: Path = Field(default=Path("./storage"), alias="STORAGE_PATH")
     admin_ids: str = Field(default="", alias="ADMIN_IDS")
 

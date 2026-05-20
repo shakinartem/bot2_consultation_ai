@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api import router as api_router
 from app.bot import start_bot
 from app.database import init_db
 from app.modules.files.storage import ensure_storage_layout
@@ -22,6 +23,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="SHARiK Consultation AI System", lifespan=lifespan)
+app.include_router(api_router)
 
 
 @app.get("/health")
