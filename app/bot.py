@@ -171,7 +171,7 @@ async def send_consultation_clients(message: Message) -> None:
         await message.answer(f"CRM недоступна: {exc}")
         return
     if not companies:
-        await message.answer("Пока нет клиентов со статусом consultation_scheduled.")
+        await message.answer("Пока нет клиентов, готовых к консультации.")
         return
     text = "\n\n".join(company_short(company) for company in companies)
     await message.answer(text, reply_markup=company_list_keyboard(companies))

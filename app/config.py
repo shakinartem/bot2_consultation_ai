@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     crm_adapter: str = Field(default="mock", alias="CRM_ADAPTER")
     crm_api_base_url: str = Field(default="http://localhost:8001", alias="CRM_API_BASE_URL")
     crm_api_token: str = Field(default="", alias="CRM_API_TOKEN")
+    crm_ready_statuses: str = Field(
+        default="consultation_planned,consultation_scheduled",
+        alias="CRM_READY_STATUSES",
+    )
     crm_shared_database_url: str = Field(
         default="sqlite+aiosqlite:///../bot1_crm/app.db",
         alias="CRM_SHARED_DATABASE_URL",
@@ -44,6 +48,10 @@ class Settings(BaseSettings):
             if item.isdigit():
                 values.add(int(item))
         return values
+
+    @property
+    def crm_ready_status_list(self) -> list[str]:
+        return [item.strip() for item in self.crm_ready_statuses.split(",") if item.strip()]
 
 
 @lru_cache

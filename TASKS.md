@@ -2,7 +2,7 @@
 
 ## Общий статус
 
-MVP доведен до рабочего сценария менеджера: FastAPI + Telegram polling bot + SQLite/SQLAlchemy + Alembic + CRM adapter + AI providers + DOCX/PDF-заготовка. Бот готов к локальному использованию с `CRM_ADAPTER=mock`; реальная интеграция с БОТОМ 1 остается следующим этапом после согласования API/схемы.
+MVP доведен до рабочего сценария менеджера: FastAPI + Telegram polling bot + SQLite/SQLAlchemy + Alembic + CRM adapter + AI providers + DOCX/PDF-заготовка. Бот готов к локальному использованию с `CRM_ADAPTER=mock`, а HTTPCRMAdapter выровнен под реальный API БОТА 1.
 
 ## Что уже реализовано
 
@@ -29,6 +29,10 @@ MVP доведен до рабочего сценария менеджера: Fa
 - [x] FastAPI endpoints для будущих web/mini app и других ботов.
 - [x] Smoke test.
 - [x] Smoke test покрывает публичный `/health` и token-защиту `/api/*`.
+- [x] HTTPCRMAdapter выровнен под БОТ 1 handoff API.
+- [x] Status mapping БОТ 2 -> БОТ 1 готов.
+- [x] Payload mapping для interactions/tasks готов.
+- [x] Smoke проверки contract mapping добавлены.
 - [x] Обновление README.
 - [x] Короткая инструкция по финальной локальной проверке перед ручным тестом.
 - [x] Стабилизация ошибок CRM при фиксации результата консультации.
@@ -36,7 +40,7 @@ MVP доведен до рабочего сценария менеджера: Fa
 
 ## MVP задачи
 
-- [x] Показывать клиентов `consultation_scheduled` из CRM adapter.
+- [x] Показывать клиентов, готовых к консультации, из CRM adapter.
 - [x] Открывать карточку стоматологии с полными данными.
 - [x] Создавать активную consultation без дублей.
 - [x] Сохранять заметки менеджера.
@@ -50,6 +54,8 @@ MVP доведен до рабочего сценария менеджера: Fa
 - [x] Дать минимальные API endpoints.
 - [x] Smoke test: CRM mock -> consultation -> fallback audit -> DOCX.
 - [x] Smoke test: `/health` публичен, а `/api/consultations` проверяется с выключенной и включенной token-защитой.
+- [x] Smoke test: payload БОТА 1 корректно маппится в `Company`.
+- [x] Smoke test: status / interaction / task payload mapping под БОТ 1 корректен.
 - [x] Smoke test: `set_result()` возвращает `warning=None` на mock CRM.
 - [x] Smoke test: при падении CRM локальный итог сохраняется, warning возвращается.
 
@@ -71,6 +77,7 @@ MVP доведен до рабочего сценария менеджера: Fa
 - [ ] Roadmap bot для ведения работ после консультации.
 - [ ] Content bot для контент-плана и материалов.
 - [ ] Web/Telegram Mini App без замены Telegram-first UX.
+- [ ] Ручной end-to-end запуск двух ботов: BOT 1 CRM + BOT 2 Consultation AI.
 
 ## Архитектурные заметки
 

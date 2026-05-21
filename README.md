@@ -4,14 +4,15 @@
 
 Связка с системой:
 
-- БОТ 1 CRM находит и ведет лидов, фиксирует холодные звонки и переводит подходящих клиентов в статус `consultation_scheduled`.
+- БОТ 1 CRM находит и ведет лидов, фиксирует холодные звонки и переводит подходящих клиентов в статус `consultation_planned`.
 - БОТ 2 не парсит клиентов сам. Он получает клиентов из CRM/БОТА 1 через `CRM_ADAPTER`.
+- Mock-режим БОТА 2 для локального MVP может продолжать использовать legacy-статус `consultation_scheduled`.
 - Менеджер в Telegram открывает карточку клиники, добавляет заметки/ссылки/материалы, генерирует AI-аудит и DOCX, затем фиксирует итог консультации.
 
 ## Возможности MVP
 
 - Telegram-first интерфейс для менеджера.
-- Список клиентов со статусом `consultation_scheduled`.
+- Список клиентов, готовых к консультации, из CRM/БОТА 1.
 - Карточка стоматологической клиники.
 - Активная консультация без дублей.
 - Заметки, ссылки и материалы клиента.
@@ -43,8 +44,9 @@ API_AUTH_ENABLED=false
 AI_PROVIDER=fallback
 
 CRM_ADAPTER=mock
-CRM_API_BASE_URL=http://localhost:8001
+CRM_API_BASE_URL=http://localhost:8000
 CRM_API_TOKEN=
+CRM_READY_STATUSES=consultation_planned,consultation_scheduled
 CRM_SHARED_DATABASE_URL=sqlite+aiosqlite:///../bot1_crm/app.db
 
 PDF_EXPORT_ENABLED=false
@@ -112,7 +114,7 @@ CRM_ADAPTER=mock
 Режимы:
 
 - `mock` / `in_memory` — локальный тестовый режим, работает без внешних зависимостей.
-- `http_api` — заготовка для API БОТА 1.
+- `http_api` — preferred режим интеграции с реальным API БОТА 1.
 - `sqlite_shared` — заготовка для чтения общей SQLite базы БОТА 1.
 
 Интерфейс adapter:
@@ -122,6 +124,7 @@ CRM_ADAPTER=mock
 - `update_company_status(company_id, status)`
 - `add_interaction(company_id, type, result, notes)`
 - `create_task(company_id, title, due_at, notes)`
+- `send_consultation_result(company_id, result, notes)` — preferred handoff результата консультации в БОТ 1
 
 Если `http_api` недоступен, бот показывает менеджеру понятную ошибку. Если `sqlite_shared` база отсутствует, бот не падает и возвращает пустые данные.
 
@@ -134,6 +137,45 @@ CRM_ADAPTER=mock
 ```
 
 Mock-режим содержит тестовые стоматологии и подходит для локальной демонстрации менеджеру.
+
+## Интеграция с БОТОМ 1
+
+Preferred режим:
+
+```env
+CRM_ADAPTER=http_api
+CRM_API_BASE_URL=http://localhost:8000
+CRM_API_TOKEN=
+CRM_READY_STATUSES=consultation_planned,consultation_scheduled
+```
+
+Если в БОТЕ 1 заполнен `BOT2_API_TOKEN`, то `CRM_API_TOKEN` в БОТЕ 2 должен совпадать с ним.
+
+Основной handoff контракт:
+
+- БОТ 2 получает клиентов из `GET /api/bot2/consultation-ready`
+- БОТ 2 отправляет итог в `POST /api/bot2/companies/{company_id}/consultation-result`
+
+Fallback, если новый handoff API еще не установлен в БОТЕ 1:
+
+- `GET /api/companies?status=consultation_planned&limit=100`
+- `PATCH /api/companies/{company_id}` с payload `{"status": "..."}`
+- `POST /api/companies/{company_id}/interactions`
+- `POST /api/tasks`
+
+Маппинг статусов БОТА 2 -> БОТ 1:
+
+- `signed` / `client` -> `deal_won`
+- `contract_sent` -> `proposal_sent`
+- `thinking` -> `interested`
+- `refused` -> `deal_lost`
+
+Маппинг interaction result БОТА 2 -> БОТ 1:
+
+- `refused` -> `rejected`
+- `thinking` -> `interested`
+- `contract_sent` -> `proposal_requested`
+- `signed` / `client` -> `deal_won`
 
 ## API auth
 
@@ -275,6 +317,10 @@ py scripts/smoke_test.py
 - `/health` доступен без API token;
 - `/api/consultations` возвращает `401` без токена, если временно включить `API_AUTH_ENABLED=true`;
 - `/api/consultations` доступен с `Authorization: Bearer test-token`, если временно включить `API_AUTH_ENABLED=true`;
+- `Company.from_mapping()` корректно читает payload БОТА 1;
+- status mapping БОТ 2 -> БОТ 1 корректный;
+- interaction payload builder собирает payload под `/api/companies/{company_id}/interactions`;
+- task payload builder собирает payload под `POST /api/tasks`;
 - mock CRM возвращает клиентов;
 - создается consultation;
 - fallback audit генерируется и парсится;
@@ -284,40 +330,66 @@ py scripts/smoke_test.py
 
 ## Финальная локальная проверка
 
-1. Запустите smoke test:
+1. Запустите smoke test БОТА 2:
 
 ```powershell
 py scripts/smoke_test.py
 ```
 
-2. Запустите FastAPI локально:
+2. Запустите БОТ 1:
 
 ```powershell
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --port 8000
 ```
 
-3. Проверьте `GET /health`:
+3. Создайте или оставьте в БОТЕ 1 компанию со статусом `consultation_planned`.
+
+4. Запустите БОТ 2:
 
 ```powershell
-curl http://127.0.0.1:8000/health
+$env:CRM_ADAPTER="http_api"
+$env:CRM_API_BASE_URL="http://localhost:8000"
+$env:CRM_API_TOKEN="<BOT2_API_TOKEN из БОТА 1, если включен>"
+uvicorn app.main:app --reload --port 8002
 ```
 
-4. Проверьте API auth:
+5. В Telegram БОТА 2:
+
+- откройте `Клиенты на консультацию`
+- убедитесь, что видна компания из БОТА 1
+- откройте карточку
+- сгенерируйте аудит
+- сгенерируйте DOCX
+- укажите итог `Думает` или `Договор отправлен`
+
+6. Проверьте в БОТЕ 1, что обновились:
+
+- статус компании
+- interaction
+- follow-up task
+
+7. Для локальной API-проверки БОТА 2 отдельно проверьте `GET /health`:
+
+```powershell
+curl http://127.0.0.1:8002/health
+```
+
+8. Для локальной API auth-проверки БОТА 2:
 
 ```powershell
 $env:API_AUTH_ENABLED="true"
 $env:API_TOKEN="test-token"
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --port 8002
 ```
 
 В новом окне:
 
 ```powershell
-curl http://127.0.0.1:8000/api/consultations
-curl -H "Authorization: Bearer test-token" http://127.0.0.1:8000/api/consultations
+curl http://127.0.0.1:8002/api/consultations
+curl -H "Authorization: Bearer test-token" http://127.0.0.1:8002/api/consultations
 ```
 
-5. Если заполнен `BOT_TOKEN`, убедитесь, что Telegram polling стартует вместе с FastAPI и бот отвечает на базовый сценарий менеджера.
+9. Если заполнен `BOT_TOKEN`, убедитесь, что Telegram polling стартует вместе с FastAPI и бот отвечает на базовый сценарий менеджера.
 
 ## Логирование
 
@@ -334,7 +406,7 @@ curl -H "Authorization: Bearer test-token" http://127.0.0.1:8000/api/consultatio
 
 ## Следующие этапы
 
-- Реальная интеграция с БОТОМ 1 после согласования схемы/API.
+- Ручной end-to-end запуск двух ботов на локальном handoff API.
 - Полноценные pytest-тесты и test DB fixtures.
 - Брендовый PDF export с шаблонами.
 - Production bot handoff после подписания договора.

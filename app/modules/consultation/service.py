@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import datetime, timedelta
 import logging
 
 from sqlalchemy import select
@@ -181,29 +180,8 @@ class ConsultationService:
             self.session.add(ConsultationNote(consultation_id=consultation_id, content=f"Итог консультации: {notes}"))
 
         warning: str | None = None
-        crm_status = "client" if result == "signed" else result_to_status[result]
         try:
-            await self.crm.update_company_status(consultation.company_id, crm_status)
-            await self.crm.add_interaction(
-                consultation.company_id,
-                type="consultation",
-                result=result_to_status[result],
-                notes=notes,
-            )
-            if result == "thinking":
-                await self.crm.create_task(
-                    consultation.company_id,
-                    title="Повторно связаться после консультации",
-                    due_at=datetime.utcnow() + timedelta(days=3),
-                    notes="Клиент думает после консультации БОТА 2.",
-                )
-            elif result == "contract_sent":
-                await self.crm.create_task(
-                    consultation.company_id,
-                    title="Проверить статус договора",
-                    due_at=datetime.utcnow() + timedelta(days=2),
-                    notes="Договор отправлен после консультации.",
-                )
+            await self.crm.send_consultation_result(consultation.company_id, result, notes)
         except CRMAdapterError as exc:
             warning = (
                 "Локальный итог консультации сохранен, но CRM/БОТ 1 не обновились. "

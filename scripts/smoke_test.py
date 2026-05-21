@@ -21,7 +21,15 @@ from app.main import app  # noqa: E402
 from app.modules.ai.parser import parse_audit_text  # noqa: E402
 from app.modules.ai.providers import FallbackProvider  # noqa: E402
 from app.modules.consultation.service import ConsultationService  # noqa: E402
-from app.modules.crm.service import CRMAdapter, CRMAdapterError, Company, crm_service  # noqa: E402
+from app.modules.crm.service import (  # noqa: E402
+    CRMAdapter,
+    CRMAdapterError,
+    Company,
+    build_bot1_interaction_payload,
+    build_bot1_task_payload,
+    crm_service,
+    map_bot2_status_to_bot1,
+)
 from app.modules.documents.generator import generate_consultation_docx  # noqa: E402
 from app.modules.files.storage import ensure_storage_layout  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -78,6 +86,65 @@ async def main() -> None:
     if smoke_db.exists():
         smoke_db.unlink()
 
+    company_from_bot1 = Company.from_mapping(
+        {
+            "id": 501,
+            "name": "Стоматология BOT1 Payload",
+            "legal_name": 'ООО "Бот 1"',
+            "city": "Саратов",
+            "region": "Саратовская область",
+            "address": "ул. Радищева, 1",
+            "phone": "+7 900 123-45-67",
+            "website": "https://bot1-clinic.example",
+            "social_links": "https://vk.com/bot1clinic, https://bot1.site/social",
+            "maps_url": "https://yandex.ru/maps/org/bot1clinic",
+            "vk_url": "https://vk.com/bot1clinic",
+            "instagram_url": "https://instagram.com/bot1clinic",
+            "telegram_url": "https://t.me/bot1clinic",
+            "other_socials": "https://youtube.com/@bot1clinic",
+            "rating": 4.8,
+            "reviews_count": 52,
+            "source": "crm",
+            "status": "consultation_planned",
+            "priority": "high",
+            "notes": "Клиника готова к консультации, просит показать точки роста.",
+        }
+    )
+    assert company_from_bot1.status == "consultation_planned", "bot1 company payload must preserve consultation_planned status"
+    assert company_from_bot1.niche == "dentistry", "bot1 company payload must default niche to dentistry"
+    assert company_from_bot1.crm_notes, "bot1 company payload must map notes into crm_notes"
+    assert company_from_bot1.pain == company_from_bot1.crm_notes, "pain may fallback to bot1 notes for MVP"
+    assert company_from_bot1.cold_call_result == company_from_bot1.crm_notes, "cold call result may fallback to bot1 notes for MVP"
+    assert "https://vk.com/bot1clinic" in company_from_bot1.social_links, "social links must include vk_url"
+    assert "https://t.me/bot1clinic" in company_from_bot1.social_links, "social links must include telegram_url"
+    assert "https://youtube.com/@bot1clinic" in company_from_bot1.social_links, "social links must include other_socials"
+
+    assert map_bot2_status_to_bot1("client") == "deal_won", "client must map to deal_won for bot1"
+    assert map_bot2_status_to_bot1("contract_sent") == "proposal_sent", "contract_sent must map to proposal_sent for bot1"
+    assert map_bot2_status_to_bot1("thinking") == "interested", "thinking must map to interested for bot1"
+    assert map_bot2_status_to_bot1("refused") == "deal_lost", "refused must map to deal_lost for bot1"
+
+    interaction_payload = build_bot1_interaction_payload("contract_sent", "Договор отправлен после консультации")
+    assert interaction_payload == {
+        "type": "consultation",
+        "result": "proposal_requested",
+        "summary": "Договор отправлен после консультации",
+        "created_by": "bot2",
+    }, "bot1 interaction payload must use consultation/proposal_requested/summary/created_by"
+
+    task_payload = build_bot1_task_payload(
+        501,
+        "Проверить статус договора",
+        datetime(2026, 5, 21, 15, 30, 0),
+        "Договор отправлен после консультации",
+    )
+    assert task_payload == {
+        "company_id": 501,
+        "title": "Проверить статус договора",
+        "description": "Договор отправлен после консультации",
+        "due_at": "2026-05-21T15:30:00",
+    }, "bot1 task payload must use POST /api/tasks contract"
+
     with TestClient(app) as client:
         response = client.get("/health")
         assert response.status_code == 200, "/health must be public and return 200"
@@ -96,7 +163,7 @@ async def main() -> None:
         await init_db()
 
         companies = await crm_service.list_consultation_scheduled()
-        assert companies, "mock CRM must return consultation_scheduled companies"
+        assert companies, "mock CRM must return companies ready for consultation"
         company = companies[0]
 
         async with AsyncSessionLocal() as session:
