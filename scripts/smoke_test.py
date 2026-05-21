@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -15,6 +16,7 @@ os.environ.setdefault("CRM_ADAPTER", "mock")
 os.environ.setdefault("STORAGE_PATH", "./storage")
 
 from app.database import AsyncSessionLocal, init_db  # noqa: E402
+from app.config import get_settings  # noqa: E402
 from app.main import app  # noqa: E402
 from app.modules.ai.parser import parse_audit_text  # noqa: E402
 from app.modules.ai.providers import FallbackProvider  # noqa: E402
@@ -54,46 +56,73 @@ class FailingCRMAdapter(CRMAdapter):
         raise CRMAdapterError("smoke CRM failure")
 
 
+@contextmanager
+def temporary_env(**updates: str):
+    previous = {key: os.environ.get(key) for key in updates}
+    try:
+        for key, value in updates.items():
+            os.environ[key] = value
+        get_settings.cache_clear()
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        get_settings.cache_clear()
+
+
 async def main() -> None:
     smoke_db = ROOT / "app_smoke.db"
     if smoke_db.exists():
         smoke_db.unlink()
 
-    client = TestClient(app)
-    response = client.get("/health")
-    assert response.status_code == 200, "/health must be public and return 200"
+    with TestClient(app) as client:
+        response = client.get("/health")
+        assert response.status_code == 200, "/health must be public and return 200"
 
-    ensure_storage_layout()
-    await init_db()
+        with temporary_env(API_AUTH_ENABLED="true", API_TOKEN="test-token"):
+            unauthorized = client.get("/api/consultations")
+            assert unauthorized.status_code == 401, "/api/consultations must require token when API auth is enabled"
 
-    companies = await crm_service.list_consultation_scheduled()
-    assert companies, "mock CRM must return consultation_scheduled companies"
-    company = companies[0]
+            authorized = client.get(
+                "/api/consultations",
+                headers={"Authorization": "Bearer test-token"},
+            )
+            assert authorized.status_code == 200, "/api/consultations must accept a valid bearer token"
 
-    async with AsyncSessionLocal() as session:
-        service = ConsultationService(session, ai_provider=FallbackProvider())
-        consultation = await service.get_or_create_for_company(company.id)
-        consultation, audit_text = await service.generate_audit(consultation.id)
-        parsed = parse_audit_text(audit_text)
-        assert parsed["overall_conclusion"], "audit parser must extract overall conclusion"
-        assert parsed["recommendations"], "audit parser must extract recommendations"
+        ensure_storage_layout()
+        await init_db()
 
-        docx_path = await generate_consultation_docx(session, consultation, company)
-        assert Path(docx_path).exists(), f"DOCX was not created: {docx_path}"
+        companies = await crm_service.list_consultation_scheduled()
+        assert companies, "mock CRM must return consultation_scheduled companies"
+        company = companies[0]
 
-        consultation, warning = await service.set_result(consultation.id, "thinking", "Smoke test result")
-        assert warning is None, "mock CRM must update without warning"
-        assert consultation.status == "thinking", "consultation result must update status"
+        async with AsyncSessionLocal() as session:
+            service = ConsultationService(session, ai_provider=FallbackProvider())
+            consultation = await service.get_or_create_for_company(company.id)
+            consultation, audit_text = await service.generate_audit(consultation.id)
+            parsed = parse_audit_text(audit_text)
+            assert parsed["overall_conclusion"], "audit parser must extract overall conclusion"
+            assert parsed["recommendations"], "audit parser must extract recommendations"
 
-        failing_service = ConsultationService(session, crm=FailingCRMAdapter(), ai_provider=FallbackProvider())
-        failing_consultation = await failing_service.create(company.id)
-        failing_consultation, warning = await failing_service.set_result(
-            failing_consultation.id,
-            "contract_sent",
-            "CRM failure smoke test",
-        )
-        assert failing_consultation.status == "contract_sent", "local result must be saved even if CRM fails"
-        assert warning, "CRM failure must return a warning"
+            docx_path = await generate_consultation_docx(session, consultation, company)
+            assert Path(docx_path).exists(), f"DOCX was not created: {docx_path}"
+
+            consultation, warning = await service.set_result(consultation.id, "thinking", "Smoke test result")
+            assert warning is None, "mock CRM must update without warning"
+            assert consultation.status == "thinking", "consultation result must update status"
+
+            failing_service = ConsultationService(session, crm=FailingCRMAdapter(), ai_provider=FallbackProvider())
+            failing_consultation = await failing_service.create(company.id)
+            failing_consultation, warning = await failing_service.set_result(
+                failing_consultation.id,
+                "contract_sent",
+                "CRM failure smoke test",
+            )
+            assert failing_consultation.status == "contract_sent", "local result must be saved even if CRM fails"
+            assert warning, "CRM failure must return a warning"
 
     print("Smoke test passed")
     print(f"Company: {company.name}")

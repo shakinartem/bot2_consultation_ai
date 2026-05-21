@@ -273,12 +273,51 @@ py scripts/smoke_test.py
 Проверяет:
 
 - `/health` доступен без API token;
+- `/api/consultations` возвращает `401` без токена, если временно включить `API_AUTH_ENABLED=true`;
+- `/api/consultations` доступен с `Authorization: Bearer test-token`, если временно включить `API_AUTH_ENABLED=true`;
 - mock CRM возвращает клиентов;
 - создается consultation;
 - fallback audit генерируется и парсится;
 - DOCX создается;
 - итог консультации обновляет статус и возвращает `warning=None` в mock CRM;
 - при падении CRM adapter локальный итог сохраняется, а warning возвращается.
+
+## Финальная локальная проверка
+
+1. Запустите smoke test:
+
+```powershell
+py scripts/smoke_test.py
+```
+
+2. Запустите FastAPI локально:
+
+```powershell
+uvicorn app.main:app --reload
+```
+
+3. Проверьте `GET /health`:
+
+```powershell
+curl http://127.0.0.1:8000/health
+```
+
+4. Проверьте API auth:
+
+```powershell
+$env:API_AUTH_ENABLED="true"
+$env:API_TOKEN="test-token"
+uvicorn app.main:app --reload
+```
+
+В новом окне:
+
+```powershell
+curl http://127.0.0.1:8000/api/consultations
+curl -H "Authorization: Bearer test-token" http://127.0.0.1:8000/api/consultations
+```
+
+5. Если заполнен `BOT_TOKEN`, убедитесь, что Telegram polling стартует вместе с FastAPI и бот отвечает на базовый сценарий менеджера.
 
 ## Логирование
 

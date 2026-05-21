@@ -28,7 +28,9 @@ MVP доведен до рабочего сценария менеджера: Fa
 - [x] Опциональная заготовка PDF export.
 - [x] FastAPI endpoints для будущих web/mini app и других ботов.
 - [x] Smoke test.
+- [x] Smoke test покрывает публичный `/health` и token-защиту `/api/*`.
 - [x] Обновление README.
+- [x] Короткая инструкция по финальной локальной проверке перед ручным тестом.
 - [x] Стабилизация ошибок CRM при фиксации результата консультации.
 - [x] API endpoints для text/link attachments.
 
@@ -47,6 +49,7 @@ MVP доведен до рабочего сценария менеджера: Fa
 - [x] Добавлять interaction/task в CRM adapter при результате.
 - [x] Дать минимальные API endpoints.
 - [x] Smoke test: CRM mock -> consultation -> fallback audit -> DOCX.
+- [x] Smoke test: `/health` публичен, а `/api/consultations` проверяется с выключенной и включенной token-защитой.
 - [x] Smoke test: `set_result()` возвращает `warning=None` на mock CRM.
 - [x] Smoke test: при падении CRM локальный итог сохраняется, warning возвращается.
 
