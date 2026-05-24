@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     ollama_model: str = Field(default="qwen2.5:7b", alias="OLLAMA_MODEL")
 
     crm_adapter: str = Field(default="mock", alias="CRM_ADAPTER")
-    crm_api_base_url: str = Field(default="http://localhost:8001", alias="CRM_API_BASE_URL")
+    crm_api_base_url: str = Field(default="http://localhost:8000", alias="CRM_API_BASE_URL")
     crm_api_token: str = Field(default="", alias="CRM_API_TOKEN")
     crm_ready_statuses: str = Field(
         default="consultation_planned,consultation_scheduled",
