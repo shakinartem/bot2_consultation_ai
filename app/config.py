@@ -37,6 +37,14 @@ class Settings(BaseSettings):
 
     storage_path: Path = Field(default=Path("./storage"), alias="STORAGE_PATH")
     admin_ids: str = Field(default="", alias="ADMIN_IDS")
+    agency_name: str = Field(default="ШАРиК digital", alias="AGENCY_NAME")
+    agency_phone: str = Field(default="", alias="AGENCY_PHONE")
+    agency_telegram: str = Field(default="", alias="AGENCY_TELEGRAM")
+    agency_email: str = Field(default="", alias="AGENCY_EMAIL")
+    agency_website: str = Field(default="", alias="AGENCY_WEBSITE")
+    agency_city: str = Field(default="", alias="AGENCY_CITY")
+    agency_geo: str = Field(default="", alias="AGENCY_GEO")
+    agency_logo_path: Path = Field(default=Path("assets/brand/logo.png"), alias="AGENCY_LOGO_PATH")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

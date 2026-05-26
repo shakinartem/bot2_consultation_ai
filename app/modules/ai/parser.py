@@ -1,7 +1,11 @@
+from __future__ import annotations
+
 import re
 
 
 AUDIT_SECTIONS = [
+    ("# Контекст продаж", "sales_context"),
+    ("# Что важно проговорить на консультации", "consultation_talking_points"),
     ("# Общий вывод", "overall_conclusion"),
     ("# Аудит сайта", "website_audit"),
     ("# Аудит карт", "maps_audit"),
@@ -18,6 +22,19 @@ AUDIT_SECTIONS = [
 ]
 
 
+PROPOSAL_SECTIONS = [
+    ("# Краткий вывод", "summary"),
+    ("# Главная проблема клиента", "client_problem"),
+    ("# Предлагаемое решение", "solution"),
+    ("# Рекомендуемый пакет", "proposal_package"),
+    ("# Что входит", "included_scope"),
+    ("# План внедрения", "implementation_plan"),
+    ("# Бюджетный ориентир", "proposal_budget_range"),
+    ("# Что нужно уточнить перед финальным КП", "clarifications"),
+    ("# Следующий шаг", "next_step"),
+]
+
+
 LEGACY_TITLES = {
     "overall_conclusion": ["1. Общий вывод"],
     "website_audit": ["2. Аудит сайта"],
@@ -30,7 +47,7 @@ LEGACY_TITLES = {
     "roadmap_7_days": ["9. План на 7 дней"],
     "roadmap_30_days": ["10. План на 30 дней"],
     "roadmap_90_days": ["11. План на 90 дней"],
-    "recommendations": ["12. Рекомендации по услугам", "12. Рекомендации"],
+    "recommendations": ["12. Рекомендации по услугам ШАРиК digital", "12. Рекомендации"],
 }
 
 
@@ -38,14 +55,14 @@ def _normalize_title(title: str) -> str:
     return re.sub(r"\s+", " ", title.strip().lstrip("#").strip()).lower()
 
 
-def parse_markdown_sections(text: str) -> dict[str, str]:
-    title_to_field = {_normalize_title(title): field for title, field in AUDIT_SECTIONS}
-    result: dict[str, str] = {}
+def _parse_sections(text: str, sections: list[tuple[str, str]]) -> dict[str, str | None]:
+    title_to_field = {_normalize_title(title): field for title, field in sections}
+    result: dict[str, str | None] = {field: None for _, field in sections}
     current_field: str | None = None
     buffer: list[str] = []
 
     def flush() -> None:
-        if current_field and buffer:
+        if current_field:
             value = "\n".join(buffer).strip()
             if value:
                 result[current_field] = value
@@ -80,9 +97,7 @@ def extract_legacy_section(text: str, title: str) -> str | None:
 
 
 def parse_audit_text(text: str) -> dict[str, str | None]:
-    parsed = parse_markdown_sections(text)
-    data: dict[str, str | None] = {field: parsed.get(field) for _, field in AUDIT_SECTIONS}
-
+    data = _parse_sections(text, AUDIT_SECTIONS)
     for field, titles in LEGACY_TITLES.items():
         if data.get(field):
             continue
@@ -91,5 +106,8 @@ def parse_audit_text(text: str) -> dict[str, str | None]:
             if value:
                 data[field] = value
                 break
-
     return data
+
+
+def parse_proposal_text(text: str) -> dict[str, str | None]:
+    return _parse_sections(text, PROPOSAL_SECTIONS)

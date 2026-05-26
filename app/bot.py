@@ -53,9 +53,13 @@ def main_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
-def is_allowed(user_id: int) -> bool:
+def is_admin(user_id: int) -> bool:
     admins = get_settings().admin_id_set
     return not admins or user_id in admins
+
+
+def is_allowed(user_id: int) -> bool:
+    return is_admin(user_id)
 
 
 async def guard_message(message: Message) -> bool:
@@ -94,9 +98,10 @@ def card_keyboard(consultation: Consultation) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🧠 Сгенерировать аудит", callback_data=f"audit:{cid}"),
             ],
             [
+                InlineKeyboardButton(text="💼 Сформировать предложение", callback_data=f"proposal:{cid}"),
                 InlineKeyboardButton(text="📄 Сгенерировать DOCX", callback_data=f"docx:{cid}"),
-                InlineKeyboardButton(text="✅ Итог консультации", callback_data=f"result_menu:{cid}"),
             ],
+            [InlineKeyboardButton(text="✅ Итог консультации", callback_data=f"result_menu:{cid}")],
             [InlineKeyboardButton(text="↩️ Назад", callback_data="back:list")],
         ]
     )
@@ -431,6 +436,28 @@ async def generate_docx_message(message: Message, consultation_id: int) -> None:
         await message.answer(pdf_result.message)
 
 
+async def generate_proposal_message(message: Message, consultation_id: int) -> None:
+    async with AsyncSessionLocal() as session:
+        service = ConsultationService(session)
+        try:
+            consultation, proposal_text = await service.generate_proposal(consultation_id)
+        except (ValueError, CRMAdapterError) as exc:
+            await message.answer(f"Не удалось сформировать предложение: {exc}")
+            return
+    preview = proposal_text[:3500]
+    await message.answer(
+        f"Предложение сохранено для консультации <code>{consultation.id}</code>.\n\n{preview}"
+    )
+
+
+@router.callback_query(F.data.startswith("proposal:"))
+async def proposal_callback(callback: CallbackQuery) -> None:
+    if not await guard_callback(callback):
+        return
+    await callback.answer("Формирую предложение...")
+    await generate_proposal_message(callback.message, int(callback.data.split(":")[1]))
+
+
 @router.callback_query(F.data.startswith("docx:"))
 async def docx_callback(callback: CallbackQuery) -> None:
     if not await guard_callback(callback):
@@ -455,6 +482,17 @@ async def docx_command(message: Message) -> None:
         await message.answer("Формат: /docx ID_консультации")
         return
     await generate_docx_message(message, int(parts[1]))
+
+
+@router.message(F.text.startswith("/proposal"))
+async def proposal_command(message: Message) -> None:
+    if not await guard_message(message):
+        return
+    parts = message.text.split()
+    if len(parts) != 2 or not parts[1].isdigit():
+        await message.answer("Формат: /proposal ID_консультации")
+        return
+    await generate_proposal_message(message, int(parts[1]))
 
 
 @router.callback_query(F.data.startswith("result_menu:"))

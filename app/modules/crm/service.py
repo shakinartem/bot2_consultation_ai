@@ -255,6 +255,9 @@ class CRMAdapter(ABC):
     ) -> None:
         raise NotImplementedError
 
+    async def get_consultation_context(self, company_id: int) -> dict[str, Any] | None:
+        return None
+
     async def send_consultation_result(self, company_id: int, result: str, notes: str | None = None) -> None:
         await self.update_company_status(company_id, result)
         await self.add_interaction(company_id, type="consultation", result=result, notes=notes)
@@ -354,6 +357,75 @@ class MockCRMAdapter(CRMAdapter):
     ) -> None:
         self.tasks.append(build_bot1_task_payload(company_id, title, due_at, notes))
 
+    async def get_consultation_context(self, company_id: int) -> dict[str, Any] | None:
+        company = await self.get_company(company_id)
+        if company is None:
+            return None
+        return {
+            "company": company.to_dict(),
+            "decision_makers": [
+                {
+                    "id": 1,
+                    "full_name": "Ирина Петрова",
+                    "role": "Владелец клиники",
+                    "phone": "+7 900 111-22-33",
+                    "email": "owner@clinic.example",
+                    "telegram": "@owner_clinic",
+                    "is_primary": True,
+                    "notes": "Принимает решение по маркетингу лично.",
+                }
+            ],
+            "contacts": [
+                {
+                    "id": 1,
+                    "type": "telegram",
+                    "value": "@clinic_admin",
+                    "label": "Администратор",
+                    "is_primary": True,
+                    "notes": "Быстро отвечает в рабочее время.",
+                }
+            ],
+            "recent_interactions": [
+                {
+                    "id": 1,
+                    "type": "call",
+                    "result": "interested",
+                    "summary": company.cold_call_result or company.crm_notes or "Готовы обсудить digital-воронку.",
+                    "next_action": "Подготовить консультацию и показать точки роста.",
+                    "next_action_at": None,
+                    "created_by": "mock_crm",
+                    "created_at": datetime.utcnow().isoformat(),
+                }
+            ],
+            "open_tasks": [
+                {
+                    "id": 1,
+                    "title": "Подготовить консультацию",
+                    "description": "Собрать материалы перед созвоном.",
+                    "due_at": None,
+                    "priority": "high",
+                    "status": "open",
+                }
+            ],
+            "latest_proposal": None,
+            "latest_call_result": {
+                "id": 1,
+                "type": "call",
+                "result": "interested",
+                "summary": company.cold_call_result or company.crm_notes or "Готовы обсудить digital-воронку.",
+                "next_action": "Подготовить консультацию и показать точки роста.",
+                "next_action_at": None,
+                "created_by": "mock_crm",
+                "created_at": datetime.utcnow().isoformat(),
+            },
+            "recommended_next_step": "Подготовить консультацию и показать точки роста.",
+            "sales_summary": (
+                f"Источник: {company.crm_notes or 'mock CRM'}. "
+                f"Статус: {company.status}. "
+                f"Что важно учесть: {company.pain or company.crm_notes or 'нужно уточнить воронку и процесс записи'}."
+            ),
+        }
+
 
 class HTTPCRMAdapter(CRMAdapter):
     def __init__(self, settings: Settings | None = None) -> None:
@@ -435,6 +507,21 @@ class HTTPCRMAdapter(CRMAdapter):
         if not data:
             return None
         return Company.from_mapping(data)
+
+    async def get_consultation_context(self, company_id: int) -> dict[str, Any] | None:
+        try:
+            data = await self._request("GET", f"/api/bot2/companies/{company_id}/consultation-context")
+            if isinstance(data, dict):
+                return data
+        except CRMAdapterError as exc:
+            if not self._should_fallback_to_legacy(exc):
+                raise
+            logger.info("Falling back to minimal consultation context after context endpoint failure: %s", exc)
+
+        company = await self.get_company(company_id)
+        if company is None:
+            return None
+        return build_minimal_consultation_context(company)
 
     async def update_company_status(self, company_id: int, status: str) -> None:
         await self._request(
@@ -593,6 +680,30 @@ class SharedSQLiteCRMAdapter(CRMAdapter):
         except Exception as exc:
             logger.warning("Shared SQLite CRM task insert failed: %s", exc)
             raise CRMAdapterError(f"Shared SQLite CRM task insert failed: {exc}") from exc
+
+    async def get_consultation_context(self, company_id: int) -> dict[str, Any] | None:
+        company = await self.get_company(company_id)
+        if company is None:
+            return None
+        return build_minimal_consultation_context(company)
+
+
+def build_minimal_consultation_context(company: Company) -> dict[str, Any]:
+    return {
+        "company": company.to_dict(),
+        "decision_makers": [],
+        "contacts": [],
+        "recent_interactions": [],
+        "open_tasks": [],
+        "latest_proposal": None,
+        "latest_call_result": None,
+        "recommended_next_step": "Провести консультацию и уточнить узкое место digital-воронки.",
+        "sales_summary": (
+            f"Статус: {company.status}. "
+            f"Источник: {company.crm_notes or 'CRM'}. "
+            f"Что важно учесть: {company.pain or company.crm_notes or 'нужно уточнить текущую digital-воронку'}."
+        ),
+    }
 
 
 def get_crm_adapter(settings: Settings | None = None) -> CRMAdapter:

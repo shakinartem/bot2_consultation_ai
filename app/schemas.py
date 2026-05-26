@@ -60,7 +60,13 @@ class ConsultationRead(BaseModel):
     roadmap_30_days: str | None = None
     roadmap_90_days: str | None = None
     next_step: str | None = None
+    sales_context: str | None = None
+    consultation_talking_points: str | None = None
     result_summary: str | None = None
+    proposal_text: str | None = None
+    proposal_package: str | None = None
+    proposal_budget_range: str | None = None
+    proposal_document_path: str | None = None
     document_path: str | None = None
     pdf_path: str | None = None
     created_at: datetime
@@ -103,3 +109,8 @@ class DocumentResponse(BaseModel):
 class ResultResponse(BaseModel):
     consultation: ConsultationRead
     warning: str | None = None
+
+
+class ProposalResponse(BaseModel):
+    consultation: ConsultationRead
+    proposal_text: str

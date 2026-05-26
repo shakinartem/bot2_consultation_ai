@@ -1,27 +1,25 @@
 # БОТ 2 — SHARiK digital Consultation AI
 
-БОТ 2 помогает менеджеру агентства ШАРиК digital / SPG готовить и проводить консультации со стоматологическими клиниками.
+БОТ 2 помогает менеджеру ШАРиК digital проводить консультации со стоматологическими клиниками после холодного звонка из БОТА 1 CRM.
 
-Связка с системой:
+Связка MVP:
 
-- БОТ 1 CRM находит и ведет лидов, фиксирует холодные звонки и переводит подходящих клиентов в статус `consultation_planned`.
-- БОТ 2 не парсит клиентов сам. Он получает клиентов из CRM/БОТА 1 через `CRM_ADAPTER`.
-- Mock-режим БОТА 2 для локального MVP может продолжать использовать legacy-статус `consultation_scheduled`.
-- Менеджер в Telegram открывает карточку клиники, добавляет заметки/ссылки/материалы, генерирует AI-аудит и DOCX, затем фиксирует итог консультации.
+- БОТ 1 переводит подходящие компании в `consultation_planned`.
+- БОТ 2 получает компании через `CRM_ADAPTER`.
+- БОТ 2 подтягивает consultation context из БОТА 1, если endpoint доступен.
+- БОТ 2 генерирует AI-аудит, предварительное предложение и DOCX для менеджера и клиента.
+- БОТ 2 отправляет итог консультации обратно в БОТ 1 через handoff API.
 
 ## Возможности MVP
 
-- Telegram-first интерфейс для менеджера.
-- Список клиентов, готовых к консультации, из CRM/БОТА 1.
-- Карточка стоматологической клиники.
-- Активная консультация без дублей.
-- Заметки, ссылки и материалы клиента.
-- AI-аудит сайта, карт, соцсетей и репутации.
-- Roadmap на 7/30/90 дней.
-- DOCX с айдентикой ШАРиК digital.
-- Опциональный PDF export через LibreOffice.
-- FastAPI endpoints для будущего web/mini app.
-- Mock CRM для локального запуска без внешних сервисов.
+- Telegram-first сценарий для менеджера.
+- Список клиентов на консультацию из CRM.
+- Карточка клиники с заметками, ссылками и материалами.
+- AI-аудит с учетом контекста продаж.
+- Предварительное предложение с безопасным fallback без внешнего AI.
+- DOCX "AI-аудит и предварительное предложение".
+- API endpoints для будущего web/mini app.
+- Mock CRM для локального запуска без БОТА 1.
 
 ## Установка
 
@@ -53,10 +51,27 @@ PDF_EXPORT_ENABLED=false
 PDF_EXPORT_PROVIDER=none
 
 STORAGE_PATH=./storage
-ADMIN_IDS=123456789,987654321
+ADMIN_IDS=111,222,333
+
+AGENCY_NAME=ШАРиК digital
+AGENCY_PHONE=
+AGENCY_TELEGRAM=
+AGENCY_EMAIL=
+AGENCY_WEBSITE=
+AGENCY_CITY=
+AGENCY_GEO=
+AGENCY_LOGO_PATH=assets/brand/logo.png
 ```
 
-Важно: пустой `ADMIN_IDS` — только dev-режим. В рабочем режиме укажите Telegram ID менеджеров, иначе бот будет доступен всем, кто знает токен.
+## Manager Access
+
+БОТ сейчас рассчитан на владельца и небольшой круг менеджеров.
+
+- `ADMIN_IDS=111,222,333` — доступ только указанным Telegram ID.
+- пустой `ADMIN_IDS` — dev mode, доступ не ограничен.
+- сложного RBAC пока нет, это следующий этап.
+
+Все Telegram handlers проверяют доступ через helper `is_admin()`.
 
 ## Запуск
 
@@ -64,14 +79,11 @@ ADMIN_IDS=123456789,987654321
 uvicorn app.main:app --reload
 ```
 
-FastAPI запускает:
+FastAPI поднимает:
 
-- `/health`;
-- `/api/*`;
-- Telegram polling, если задан `BOT_TOKEN`;
-- создание таблиц SQLite через SQLAlchemy metadata.
-
-Если `BOT_TOKEN` пустой, Telegram polling не запускается. Это удобно для smoke/API-проверок: FastAPI стартует, а в лог пишется `Telegram bot disabled: BOT_TOKEN is empty`.
+- `/health`
+- `/api/*`
+- Telegram polling, если задан `BOT_TOKEN`
 
 Для миграций:
 
@@ -79,68 +91,61 @@ FastAPI запускает:
 alembic upgrade head
 ```
 
+Если `BOT_TOKEN` пустой, FastAPI и API стартуют без Telegram polling. Это удобно для smoke и локальных API-проверок.
+
 ## Telegram сценарий
 
 Главное меню:
 
-- 📋 Клиенты на консультацию
-- 🔎 Открыть карточку
-- 🧠 Сгенерировать аудит
-- 📄 Сгенерировать документ
-- ✅ Указать результат консультации
-- 🗂 Архив консультаций
-- ⚙️ Настройки AI
-- ❓ Помощь
+- `📋 Клиенты на консультацию`
+- `🔎 Открыть карточку`
+- `🧠 Сгенерировать аудит`
+- `📄 Сгенерировать документ`
+- `✅ Указать результат консультации`
+- `🗂 Архив консультаций`
+- `⚙️ Настройки AI`
+- `❓ Помощь`
 
-Рабочий путь менеджера:
+В карточке консультации доступны действия:
 
-1. Нажать `📋 Клиенты на консультацию`.
-2. Открыть карточку стоматологии.
-3. Добавить заметку, ссылки и материалы.
-4. Сгенерировать AI-аудит.
-5. Сгенерировать DOCX.
-6. Указать итог: отказ, думает, договор отправлен, договор подписан.
+- `📝 Добавить заметку`
+- `🔗 Добавить ссылки`
+- `📎 Добавить материалы`
+- `🧠 Сгенерировать аудит`
+- `💼 Сформировать предложение`
+- `📄 Сгенерировать DOCX`
+- `✅ Итог консультации`
 
-При подписании договора статус консультации становится `client`, а CRM adapter получает обновление статуса компании.
+Команды:
+
+- `/audit ID`
+- `/proposal ID`
+- `/docx ID`
+- `/result ID`
 
 ## CRM_ADAPTER
 
-Настройка:
+Поддерживаются режимы:
 
-```env
-CRM_ADAPTER=mock
-```
-
-Режимы:
-
-- `mock` / `in_memory` — локальный тестовый режим, работает без внешних зависимостей.
-- `http_api` — preferred режим интеграции с реальным API БОТА 1.
-- `sqlite_shared` — заготовка для чтения общей SQLite базы БОТА 1.
+- `mock` / `in_memory` — локальный тестовый режим.
+- `http_api` — основной режим интеграции с БОТОМ 1.
+- `sqlite_shared` — упрощенный режим чтения из общей SQLite базы.
 
 Интерфейс adapter:
 
 - `list_consultation_scheduled()`
 - `get_company(company_id)`
+- `get_consultation_context(company_id)`
 - `update_company_status(company_id, status)`
 - `add_interaction(company_id, type, result, notes)`
 - `create_task(company_id, title, due_at, notes)`
-- `send_consultation_result(company_id, result, notes)` — preferred handoff результата консультации в БОТ 1
+- `send_consultation_result(company_id, result, notes)`
 
-Если `http_api` недоступен, бот показывает менеджеру понятную ошибку. Если `sqlite_shared` база отсутствует, бот не падает и возвращает пустые данные.
-
-Если CRM недоступна во время фиксации итога консультации, БОТ 2 всё равно сохраняет локальный результат консультации и показывает предупреждение: CRM/БОТ 1 не обновились. Это значит, что менеджеру нужно повторить синхронизацию или проверить БОТ 1.
-
-Для проверки без БОТА 1 используйте:
-
-```env
-CRM_ADAPTER=mock
-```
-
-Mock-режим содержит тестовые стоматологии и подходит для локальной демонстрации менеджеру.
+Если `http_api` не может получить consultation context по новому endpoint, БОТ 2 автоматически делает fallback на `get_company()` и собирает минимальный context локально.
 
 ## Интеграция с БОТОМ 1
 
-Preferred режим:
+Основной режим:
 
 ```env
 CRM_ADAPTER=http_api
@@ -151,128 +156,130 @@ CRM_READY_STATUSES=consultation_planned,consultation_scheduled
 
 Если в БОТЕ 1 заполнен `BOT2_API_TOKEN`, то `CRM_API_TOKEN` в БОТЕ 2 должен совпадать с ним.
 
-Основной handoff контракт:
+БОТ 2 использует:
 
-- БОТ 2 получает клиентов из `GET /api/bot2/consultation-ready`
-- БОТ 2 отправляет итог в `POST /api/bot2/companies/{company_id}/consultation-result`
+- `GET /api/bot2/consultation-ready`
+- `GET /api/bot2/companies/{company_id}/consultation-context`
+- `POST /api/bot2/companies/{company_id}/consultation-result`
 
-Fallback, если новый handoff API еще не установлен в БОТЕ 1:
+`GET /api/bot2/companies/{company_id}/consultation-context` возвращает расширенный sales context:
 
-- `GET /api/companies?status=consultation_planned&limit=100`
-- `PATCH /api/companies/{company_id}` с payload `{"status": "..."}`
-- `POST /api/companies/{company_id}/interactions`
-- `POST /api/tasks`
+- данные компании
+- ЛПР
+- контакты
+- историю касаний
+- открытые задачи
+- последний proposal
+- последний call result
+- `recommended_next_step`
+- `sales_summary`
 
-Маппинг статусов БОТА 2 -> БОТ 1:
+Если endpoint временно недоступен, БОТ 2 не падает и продолжает работать в fallback-режиме с минимальным context.
 
-- `signed` / `client` -> `deal_won`
-- `contract_sent` -> `proposal_sent`
-- `thinking` -> `interested`
-- `refused` -> `deal_lost`
+## AI Audit и Proposal
 
-Маппинг interaction result БОТА 2 -> БОТ 1:
+AI-аудит теперь учитывает:
 
-- `refused` -> `rejected`
-- `thinking` -> `interested`
-- `contract_sent` -> `proposal_requested`
-- `signed` / `client` -> `deal_won`
+- данные компании
+- ЛПР и контакты
+- историю касаний из CRM
+- последний звонок и последний proposal
+- открытые задачи
+- `sales_summary`
+- `recommended_next_step`
+- заметки менеджера
+- ссылки и материалы из консультации
 
-## API auth
+Аудит сохраняет отдельные разделы:
 
-По умолчанию API открыт для локальной разработки:
+- `# Контекст продаж`
+- `# Что важно проговорить на консультации`
 
-```env
-API_AUTH_ENABLED=false
-```
+Предложение строится по структуре:
 
-Чтобы защитить `/api/*`, включите:
-
-```env
-API_AUTH_ENABLED=true
-API_TOKEN=your_internal_token
-```
-
-После этого все `/api/*` endpoints требуют header:
-
-```text
-Authorization: Bearer your_internal_token
-```
-
-`/health` остается публичным. Если `API_AUTH_ENABLED=true`, но `API_TOKEN` пустой, приложение пишет предупреждение в лог, а `/api/*` возвращает ошибку конфигурации.
-
-## AI providers
-
-```env
-AI_PROVIDER=fallback
-```
-
-Поддерживаются:
-
-- `fallback` — локальный структурированный шаблон, без ключей и сети.
-- `openrouter` — OpenRouter chat completions.
-- `ollama` — локальный Ollama.
-
-Fallback всегда возвращает markdown-разделы:
-
-- `# Общий вывод`
-- `# Аудит сайта`
-- `# Аудит карт`
-- `# Аудит соцсетей`
-- `# Репутация`
-- `# Основные проблемы`
-- `# Точки роста`
-- `# Быстрые улучшения`
-- `# План на 7 дней`
-- `# План на 30 дней`
-- `# План на 90 дней`
-- `# Рекомендации по услугам ШАРиК digital`
+- `# Краткий вывод`
+- `# Главная проблема клиента`
+- `# Предлагаемое решение`
+- `# Рекомендуемый пакет`
+- `# Что входит`
+- `# План внедрения`
+- `# Бюджетный ориентир`
+- `# Что нужно уточнить перед финальным КП`
 - `# Следующий шаг`
 
-Prompt builder:
+Если внешний AI недоступен, deterministic fallback все равно генерирует audit и proposal.
 
-```python
-build_consultation_audit_prompt(company_data, extra_data)
-```
+Прайс в предложении использует текущие ориентиры ШАРиК digital и всегда формулируется как предварительный ориентир, без гарантированного результата и без выдуманных кейсов.
 
-Он учитывает название клиники, город, сайт, карты, рейтинг, отзывы, соцсети, заметки CRM, боль клиента, результат холодного звонка, заметки менеджера и материалы.
+## DOCX и бренд
 
-## DOCX/PDF
-
-DOCX создается всегда:
+DOCX создается по пути:
 
 ```text
 storage/docs/consultation_company_{company_id}_{consultation_id}.docx
 ```
 
-Структура документа:
+Документ включает:
 
-- обложка;
-- краткое резюме;
-- таблица данных клиента;
-- аудит сайта, карт, соцсетей и репутации;
-- основные проблемы;
-- точки роста;
-- быстрые улучшения;
-- план на 7/30/90 дней;
-- рекомендации по услугам ШАРиК digital;
-- следующий шаг;
-- подвал с позиционированием агентства.
+1. Обложку
+2. Данные клиента
+3. Контекст продаж
+4. Главный вывод
+5. Где клиника теряет заявки
+6. Аудит сайта
+7. Аудит карт
+8. Аудит соцсетей
+9. Репутацию
+10. Основные проблемы
+11. Точки роста
+12. Roadmap 7/30/90 дней
+13. Предварительное предложение
+14. Следующий шаг
+15. Подвал с контактами ШАРиК digital
 
-PDF опционален:
+Контакты агентства выводятся только если заполнены:
+
+- телефон
+- Telegram
+- сайт
+- email
+- город
+- география
+
+Логотип опциональный. Если `assets/brand/logo.png` отсутствует, DOCX все равно генерируется.
+
+## Брендовые ассеты
+
+Папка:
+
+```text
+assets/brand/
+```
+
+Содержит:
+
+- `.gitkeep`
+- `README.md`
+
+Туда можно положить `logo.png`. Рекомендуемый формат: PNG с прозрачным фоном.
+
+## DOCX/PDF
+
+PDF по-прежнему опционален:
 
 ```env
 PDF_EXPORT_ENABLED=false
 PDF_EXPORT_PROVIDER=none
 ```
 
-Для локального PDF:
+Для локального PDF через LibreOffice:
 
 ```env
 PDF_EXPORT_ENABLED=true
 PDF_EXPORT_PROVIDER=libreoffice
 ```
 
-Если LibreOffice недоступен, бот отправит DOCX и сообщит, что PDF недоступен.
+Если LibreOffice недоступен, БОТ 2 отправляет DOCX и пишет понятное сообщение, что PDF не был собран.
 
 ## API endpoints
 
@@ -284,6 +291,7 @@ PDF_EXPORT_PROVIDER=libreoffice
 - `POST /api/consultations/{consultation_id}/attachments/link`
 - `POST /api/consultations/{consultation_id}/attachments/text`
 - `POST /api/consultations/{consultation_id}/generate-audit`
+- `POST /api/consultations/{consultation_id}/generate-proposal`
 - `POST /api/consultations/{consultation_id}/generate-docx`
 - `POST /api/consultations/{consultation_id}/result`
 - `GET /api/crm/consultation-scheduled`
@@ -298,13 +306,13 @@ storage/
 └── clients/
 ```
 
-Материалы клиента:
+Материалы клиента сохраняются в:
 
 ```text
 storage/clients/company_{id}/
 ```
 
-`.gitignore` исключает `.env`, SQLite базы и реальные клиентские файлы из `storage`.
+`.gitignore` должен исключать `.env`, SQLite базы и реальные клиентские файлы из `storage`.
 
 ## Smoke test
 
@@ -314,37 +322,60 @@ py scripts/smoke_test.py
 
 Проверяет:
 
-- `/health` доступен без API token;
-- `/api/consultations` возвращает `401` без токена, если временно включить `API_AUTH_ENABLED=true`;
-- `/api/consultations` доступен с `Authorization: Bearer test-token`, если временно включить `API_AUTH_ENABLED=true`;
-- `Company.from_mapping()` корректно читает payload БОТА 1;
-- status mapping БОТ 2 -> БОТ 1 корректный;
-- interaction payload builder собирает payload под `/api/companies/{company_id}/interactions`;
-- task payload builder собирает payload под `POST /api/tasks`;
-- mock CRM возвращает клиентов;
-- создается consultation;
-- fallback audit генерируется и парсится;
-- DOCX создается;
-- итог консультации обновляет статус и возвращает `warning=None` в mock CRM;
-- при падении CRM adapter локальный итог сохраняется, а warning возвращается.
+- `/health`
+- API auth на `/api/consultations`
+- mock CRM
+- `get_consultation_context()`
+- fallback audit
+- парсинг `sales_context` и `consultation_talking_points`
+- fallback proposal
+- API endpoint `POST /api/consultations/{id}/generate-proposal`
+- DOCX генерацию
+- сохранение результата консультации
 
-## Финальная локальная проверка
+## Docker Future / Local Compose Notes
 
-1. Запустите smoke test БОТА 2:
+Dev-файлы:
+
+- `Dockerfile.dev`
+- `.dockerignore`
+- `docker/docker-compose.dev.yml`
+
+Локальный compose поднимает только:
+
+- `bot1-crm`
+- `bot2-consultation`
+
+Будущие сервисы `bot3-content`, `bot4-autoposter`, `bot5-reporter` уже добавлены как commented placeholders.
+
+Запуск:
 
 ```powershell
-py scripts/smoke_test.py
+docker compose -f docker/docker-compose.dev.yml up --build
 ```
 
-2. Запустите БОТ 1:
+Где лежат `.env`:
+
+- для `bot1-crm` — в репозитории БОТА 1
+- для `bot2-consultation` — в этом репозитории
+
+Внутри Docker-сети БОТ 2 должен ходить в БОТ 1 по:
+
+```env
+CRM_API_BASE_URL=http://bot1-crm:8000
+```
+
+Production-версия с PostgreSQL/Redis и остальными ботами будет добавляться позже.
+
+## Ручная локальная проверка
+
+1. Запустить БОТ 1:
 
 ```powershell
 uvicorn app.main:app --reload --port 8000
 ```
 
-3. Создайте или оставьте в БОТЕ 1 компанию со статусом `consultation_planned`.
-
-4. Запустите БОТ 2:
+2. Запустить БОТ 2:
 
 ```powershell
 $env:CRM_ADAPTER="http_api"
@@ -353,63 +384,24 @@ $env:CRM_API_TOKEN="<BOT2_API_TOKEN из БОТА 1, если включен>"
 uvicorn app.main:app --reload --port 8002
 ```
 
-5. В Telegram БОТА 2:
+3. В Telegram БОТА 2:
 
-- откройте `Клиенты на консультацию`
-- убедитесь, что видна компания из БОТА 1
-- откройте карточку
-- сгенерируйте аудит
-- сгенерируйте DOCX
-- укажите итог `Думает` или `Договор отправлен`
+- открыть `Клиенты на консультацию`
+- открыть карточку
+- сгенерировать аудит
+- сформировать предложение
+- сгенерировать DOCX
+- указать итог консультации
 
-6. Проверьте в БОТЕ 1, что обновились:
+4. В БОТЕ 1 проверить:
 
 - статус компании
-- interaction
-- follow-up task
-
-7. Для локальной API-проверки БОТА 2 отдельно проверьте `GET /health`:
-
-```powershell
-curl http://127.0.0.1:8002/health
-```
-
-8. Для локальной API auth-проверки БОТА 2:
-
-```powershell
-$env:API_AUTH_ENABLED="true"
-$env:API_TOKEN="test-token"
-uvicorn app.main:app --reload --port 8002
-```
-
-В новом окне:
-
-```powershell
-curl http://127.0.0.1:8002/api/consultations
-curl -H "Authorization: Bearer test-token" http://127.0.0.1:8002/api/consultations
-```
-
-9. Если заполнен `BOT_TOKEN`, убедитесь, что Telegram polling стартует вместе с FastAPI и бот отвечает на базовый сценарий менеджера.
-
-## Логирование
-
-Логируются:
-
-- старт/остановка FastAPI;
-- отключение Telegram при пустом `BOT_TOKEN`;
-- старт/падение Telegram polling;
-- ошибки CRM adapter;
-- ошибки AI provider и переход на fallback;
-- ошибки PDF export.
-
-Секреты `BOT_TOKEN`, `OPENROUTER_API_KEY`, `CRM_API_TOKEN`, `API_TOKEN` не логируются.
+- LeadInteraction
+- FollowUpTask
 
 ## Следующие этапы
 
-- Ручной end-to-end запуск двух ботов на локальном handoff API.
-- Полноценные pytest-тесты и test DB fixtures.
-- Брендовый PDF export с шаблонами.
-- Production bot handoff после подписания договора.
-- Roadmap bot для ведения работ.
-- Content bot для контента стоматологии.
-- Опциональное внешнее хранилище, например Cloudinary, без обязательной зависимости в MVP.
+- Отдельный proposal DOCX/export для отправки клиенту.
+- Более точные шаблоны КП после накопления кейсов и пакетов.
+- RBAC для нескольких ролей менеджеров.
+- Production compose для всей связки из 5 ботов.

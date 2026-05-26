@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from dataclasses import asdict
 import logging
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.modules.ai.parser import parse_audit_text
-from app.modules.ai.prompts import build_consultation_audit_prompt
+from app.modules.ai.parser import parse_audit_text, parse_proposal_text
+from app.modules.ai.prompts import build_consultation_audit_prompt, build_fallback_proposal_text, build_proposal_prompt
 from app.modules.ai.providers import AIProvider, AIProviderError, FallbackProvider, get_ai_provider
 from app.modules.consultation.models import (
     Consultation,
@@ -132,18 +133,22 @@ class ConsultationService:
             ],
         }
 
+    async def _build_generation_context(self, consultation: Consultation) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        company = await self.crm.get_company(consultation.company_id)
+        if company is None:
+            raise ValueError("Company not found")
+        extra_context = await self._extra_audit_context(consultation.id)
+        crm_context = await self.crm.get_consultation_context(consultation.company_id) or {}
+        return asdict(company), extra_context, crm_context
+
     async def generate_audit(self, consultation_id: int, extra_data: dict | None = None) -> tuple[Consultation, str]:
         consultation = await self.get(consultation_id)
         if consultation is None:
             raise ValueError("Consultation not found")
-        company = await self.crm.get_company(consultation.company_id)
-        if company is None:
-            raise ValueError("Company not found")
-
-        context = await self._extra_audit_context(consultation_id)
+        company_data, context, crm_context = await self._build_generation_context(consultation)
         if extra_data:
             context.update(extra_data)
-        prompt = build_consultation_audit_prompt(asdict(company), context)
+        prompt = build_consultation_audit_prompt(company_data, context, crm_context)
         try:
             audit_text = await self.ai_provider.generate(prompt)
         except AIProviderError as exc:
@@ -158,6 +163,45 @@ class ConsultationService:
         await self.session.commit()
         await self.session.refresh(consultation)
         return consultation, audit_text
+
+    async def generate_proposal(self, consultation_id: int) -> tuple[Consultation, str]:
+        consultation = await self.get(consultation_id)
+        if consultation is None:
+            raise ValueError("Consultation not found")
+
+        company_data, extra_context, crm_context = await self._build_generation_context(consultation)
+        consultation_data = {
+            "overall_conclusion": consultation.overall_conclusion,
+            "main_problems": consultation.main_problems,
+            "growth_points": consultation.growth_points,
+            "quick_improvements": consultation.quick_improvements,
+            "recommendations": consultation.recommendations,
+            "roadmap_7_days": consultation.roadmap_7_days,
+            "roadmap_30_days": consultation.roadmap_30_days,
+            "roadmap_90_days": consultation.roadmap_90_days,
+            "next_step": consultation.next_step,
+            "sales_context": consultation.sales_context,
+            "consultation_talking_points": consultation.consultation_talking_points,
+            "result_summary": consultation.result_summary,
+        }
+
+        prompt = build_proposal_prompt(company_data, consultation_data, crm_context, extra_context)
+        if isinstance(self.ai_provider, FallbackProvider):
+            proposal_text = build_fallback_proposal_text(company_data, consultation_data, crm_context)
+        else:
+            try:
+                proposal_text = await self.ai_provider.generate(prompt)
+            except AIProviderError as exc:
+                logger.warning("AI provider failed for proposal %s, using fallback: %s", consultation_id, exc)
+                proposal_text = build_fallback_proposal_text(company_data, consultation_data, crm_context)
+
+        parsed = parse_proposal_text(proposal_text)
+        consultation.proposal_text = proposal_text
+        consultation.proposal_package = parsed.get("proposal_package")
+        consultation.proposal_budget_range = parsed.get("proposal_budget_range")
+        await self.session.commit()
+        await self.session.refresh(consultation)
+        return consultation, proposal_text
 
     async def set_result(self, consultation_id: int, result: str, notes: str | None = None) -> tuple[Consultation, str | None]:
         consultation = await self.get(consultation_id)

@@ -14,6 +14,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./app_smoke.db")
 os.environ.setdefault("AI_PROVIDER", "fallback")
 os.environ.setdefault("CRM_ADAPTER", "mock")
 os.environ.setdefault("STORAGE_PATH", "./storage")
+os.environ["BOT_TOKEN"] = ""
 
 from app.database import AsyncSessionLocal, init_db  # noqa: E402
 from app.config import get_settings  # noqa: E402
@@ -169,10 +170,22 @@ async def main() -> None:
         async with AsyncSessionLocal() as session:
             service = ConsultationService(session, ai_provider=FallbackProvider())
             consultation = await service.get_or_create_for_company(company.id)
+            crm_context = await crm_service.get_consultation_context(company.id)
+            assert crm_context, "mock CRM must return consultation context"
+            assert crm_context["sales_summary"], "mock consultation context must include sales_summary"
+            assert crm_context["recommended_next_step"], "mock consultation context must include recommended_next_step"
             consultation, audit_text = await service.generate_audit(consultation.id)
             parsed = parse_audit_text(audit_text)
+            assert parsed["sales_context"], "audit parser must extract sales context"
+            assert parsed["consultation_talking_points"], "audit parser must extract consultation talking points"
             assert parsed["overall_conclusion"], "audit parser must extract overall conclusion"
             assert parsed["recommendations"], "audit parser must extract recommendations"
+
+            consultation, proposal_text = await service.generate_proposal(consultation.id)
+            assert consultation.proposal_text, "proposal text must be saved"
+            assert consultation.proposal_package, "proposal package must be extracted"
+            assert consultation.proposal_budget_range, "proposal budget must be extracted"
+            assert "# Рекомендуемый пакет" in proposal_text, "proposal text must contain required sections"
 
             docx_path = await generate_consultation_docx(session, consultation, company)
             assert Path(docx_path).exists(), f"DOCX was not created: {docx_path}"
@@ -190,6 +203,10 @@ async def main() -> None:
             )
             assert failing_consultation.status == "contract_sent", "local result must be saved even if CRM fails"
             assert warning, "CRM failure must return a warning"
+
+        proposal_api = client.post("/api/consultations/1/generate-proposal")
+        assert proposal_api.status_code == 200, "proposal API endpoint must work"
+        assert proposal_api.json()["proposal_text"], "proposal API must return generated proposal text"
 
     print("Smoke test passed")
     print(f"Company: {company.name}")

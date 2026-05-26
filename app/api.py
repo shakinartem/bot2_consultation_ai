@@ -19,6 +19,7 @@ from app.schemas import (
     DocumentResponse,
     NoteCreate,
     NoteRead,
+    ProposalResponse,
     ResultCreate,
     ResultResponse,
 )
@@ -129,6 +130,17 @@ async def generate_docx(consultation_id: int, session: AsyncSession = Depends(ge
         pdf_path=str(pdf_result.path) if pdf_result.path else None,
         pdf_message=pdf_result.message,
     )
+
+
+@router.post("/consultations/{consultation_id}/generate-proposal", response_model=ProposalResponse)
+async def generate_proposal(consultation_id: int, session: AsyncSession = Depends(get_session)):
+    try:
+        consultation, proposal_text = await ConsultationService(session).generate_proposal(consultation_id)
+    except CRMAdapterError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return ProposalResponse(consultation=consultation, proposal_text=proposal_text)
 
 
 @router.post("/consultations/{consultation_id}/result", response_model=ResultResponse)

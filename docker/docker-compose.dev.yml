@@ -1,0 +1,48 @@
+services:
+  bot1-crm:
+    build:
+      context: ../../1_CRM_bot
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../../1_CRM_bot/.env
+    volumes:
+      - bot1_storage:/app/storage
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  bot2-consultation:
+    build:
+      context: ..
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8002:8000"
+    env_file:
+      - ../.env
+    environment:
+      CRM_ADAPTER: http_api
+      CRM_API_BASE_URL: http://bot1-crm:8000
+    volumes:
+      - bot2_storage:/app/storage
+    depends_on:
+      - bot1-crm
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  # bot3-content:
+  #   build: ../bot3-content
+  #   env_file:
+  #     - ../bot3-content/.env
+
+  # bot4-autoposter:
+  #   build: ../bot4-autoposter
+  #   env_file:
+  #     - ../bot4-autoposter/.env
+
+  # bot5-reporter:
+  #   build: ../bot5-reporter
+  #   env_file:
+  #     - ../bot5-reporter/.env
+
+volumes:
+  bot1_storage:
+  bot2_storage:
