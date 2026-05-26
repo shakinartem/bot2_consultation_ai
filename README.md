@@ -348,6 +348,9 @@ Dev-файлы:
 
 Будущие сервисы `bot3-content`, `bot4-autoposter`, `bot5-reporter` уже добавлены как commented placeholders.
 
+По умолчанию `docker/docker-compose.dev.yml` ожидает, что репозиторий БОТА 1 лежит по пути `../../bot1_crm`.
+Если локальная папка называется иначе, замените `context` и `env_file` для сервиса `bot1-crm` вручную.
+
 Запуск:
 
 ```powershell

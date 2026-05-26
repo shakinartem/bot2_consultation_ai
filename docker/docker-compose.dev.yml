@@ -1,12 +1,12 @@
 services:
   bot1-crm:
     build:
-      context: ../../1_CRM_bot
+      context: ../../bot1_crm
       dockerfile: Dockerfile.dev
     ports:
       - "8000:8000"
     env_file:
-      - ../../1_CRM_bot/.env
+      - ../../bot1_crm/.env
     volumes:
       - bot1_storage:/app/storage
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
